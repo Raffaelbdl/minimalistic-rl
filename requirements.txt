@@ -1,0 +1,8 @@
+gym
+numpy
+pygame
+
+-f https://storage.googleapis.com/jax-releases/jax_releases.html
+chex
+dm-haiku
+optax
