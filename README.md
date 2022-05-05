@@ -36,3 +36,12 @@ class CustomWrapper(ObservationWrapper):
     
 env = CustomWrapper(env)
 ```
+
+## Installation 
+
+Simply run (Linux Only):
+
+```bash
+pip install git+https://github.com/Raffaelbdl/minimalistic-rl
+```
+
