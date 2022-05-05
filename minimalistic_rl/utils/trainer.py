@@ -6,7 +6,7 @@ import gym
 from jax import random as jrng
 
 from minimalistic_rl import algorithms as algo
-from minimalistic_rl.buffer import TransitionBatch
+from minimalistic_rl.buffer import from_singles
 
 
 Array = chex.Array
@@ -44,7 +44,7 @@ def train(
         a, logp = agent.act(rng=rng1, s=s)
         s_next, r, done, _ = env.step(action=a)
 
-        transition = TransitionBatch._from_singles(s, a, r, done, s_next, logp)
+        transition = from_singles(s, a, r, done, s_next, logp)
         agent.buffer.add(transition=transition)
 
         if improve_condition(step=step, agent=agent):

@@ -11,6 +11,7 @@ import numpy as np
 import optax
 
 from minimalistic_rl.algorithms import Base
+from minimalistic_rl.buffer import to_tuple
 from minimalistic_rl.utils.updater import apply_updates
 
 Array = chex.Array
@@ -73,13 +74,14 @@ class PPO(Base):
 
         a = jrng.choice(rng, jnp.arange(0, self.num_actions), p=prob)
         logp = jnp.log(prob[a])
-
         return int(a), logp
 
     def improve(self):
         """Performs a training loop"""
         batch_size = self.config["batch_size"]
-        S, A, R, Done, S_next, Logp = self.buffer.sample_all()
+
+        Transition = self.buffer.sample_all()
+        S, A, R, Done, S_next, Logp = to_tuple(Transition)
 
         n_batch = len(S) // batch_size
 

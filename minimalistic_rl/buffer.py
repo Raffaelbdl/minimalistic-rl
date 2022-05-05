@@ -1,42 +1,43 @@
-from collections import deque, namedtuple
+from collections import deque
+from dataclasses import field
 import random
-from typing import Optional
+from typing import Optional, Tuple
 
 import chex
 import jax
 import numpy as np
 
+Array = chex.Array
 ArrayNumpy = chex.ArrayNumpy
 Numeric = chex.Numeric
 
-transition_namedtuple = namedtuple(
-    "TransitionBatch", ["S", "A", "R", "Done", "S_next", "logP"]
-)
 
-
+@chex.dataclass
 class TransitionBatch:
-    def __init__(self, S, A, R, Done, S_next, logP=0):
+    S: Array
+    A: Array
+    R: Array
+    Done: Array
+    S_next: Array
+    Logp: Array = field(default=0)
 
-        self.S = S
-        self.A = A
-        self.R = R
-        self.Done = Done
-        self.S_next = S_next
-        self.logP = logP
 
-    def _to_named_tuple(self):
-        return transition_namedtuple(
-            self.S, self.A, self.R, self.Done, self.S_next, self.logP
-        )
+def from_singles(s, a, r, done, s_next, logp=Optional[None]) -> TransitionBatch:
+    logp = logp if logp else 0
 
-    @classmethod
-    def _from_singles(cls, s, a, r, done, s_next, logp=Optional[None]):
-        logp = logp if logp else 0
+    cls_kwargs = {}
+    for k, x in zip(
+        TransitionBatch.__annotations__.keys(), (s, a, r, done, s_next, logp)
+    ):
+        cls_kwargs[k] = as_batch(x)
+    return TransitionBatch(**cls_kwargs)
 
-        cls_args = []
-        for x in (s, a, r, done, s_next, logp):
-            cls_args.append(as_batch(x))
-        return cls(*cls_args)
+
+def to_tuple(transition: TransitionBatch) -> Tuple[Array]:
+    _tmp = []
+    for k in transition.__annotations__.keys():
+        _tmp.append(transition[k])
+    return tuple(_tmp)
 
 
 class Buffer:
@@ -48,7 +49,7 @@ class Buffer:
         self.storage = deque(maxlen=self.capacity)
 
     def add(self, transition: TransitionBatch):
-        self.storage.extend([transition._to_named_tuple()])
+        self.storage.extend([transition])
 
     def sample(self, batch_size):
         transitions = random.sample(self.storage, batch_size)
