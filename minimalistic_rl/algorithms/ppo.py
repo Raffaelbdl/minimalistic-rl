@@ -55,19 +55,25 @@ class PPO(Base):
 
     def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, Scalar]:
         """Performs an action in the environment"""
+
+        rng1, rng2 = jrng.split(rng, 2)
+
         params = self.params
 
         S = jnp.expand_dims(s, axis=0)
-        logit = jnp.squeeze(self.actor_apply(params, S), axis=0)
+        logit = jnp.squeeze(self.actor_apply(params, rng1, S), axis=0)
         prob = jax.nn.softmax(logit)
 
-        a = jrng.choice(rng, jnp.arange(0, self.num_actions), p=prob)
+        a = jrng.choice(rng2, jnp.arange(0, self.num_actions), p=prob)
         logp = jnp.log(prob[a])
 
         return int(a), logp
 
     def improve(self):
         """Performs n_train_steps training loops"""
+
+        self.rng, rng1, rng2 = jrng.split(self.rng, 3)
+
         batch_size = self.config["batch_size"]
 
         Transition = self.buffer.sample_all()
@@ -77,11 +83,14 @@ class PPO(Base):
 
         gamma = self.config["gamma"]
         Discount_R = compute_Discount_R(gamma, R, Done)
-        Adv = compute_Adv(self.params, self.critic_apply, S, Discount_R)
+        Adv = compute_Adv(self.params, rng1, self.critic_apply, S, Discount_R)
 
         n_train_steps = self.config["n_train_steps"]
         for _ in range(n_train_steps):
             for i in range(n_batch):
+
+                rng2, _rng2 = jrng.split(rng2, 2)
+
                 idx = np.array(range(i * batch_size, (i + 1) * batch_size))
                 _S = S[idx]
                 _A = A[idx]
@@ -92,6 +101,7 @@ class PPO(Base):
                 epsilon = self.config["epsilon"]
                 loss, grads = jax.value_and_grad(ppo_loss)(
                     self.params,
+                    _rng2,
                     self.actor_apply,
                     self.critic_apply,
                     epsilon,
@@ -126,17 +136,18 @@ def compute_Discount_R(gamma: float, R: Array, Done: Array) -> Array:
     return Discount_R
 
 
-@functools.partial(jax.jit, static_argnums=(1))
+@functools.partial(jax.jit, static_argnums=(2))
 def compute_Adv(
-    params: hk.Params, critic_apply: Callable, S: Array, Discount_R: Array
+    params: hk.Params, rng: PRNGKey, critic_apply: Callable, S: Array, Discount_R: Array
 ) -> Array:
     """Computes the advantage, td error"""
 
-    return Discount_R - critic_apply(params, S)
+    return Discount_R - critic_apply(params, rng, S)
 
 
 def actor_loss(
     params: hk.Params,
+    rng: PRNGKey,
     actor_apply: Callable,
     epsilon: float,
     S: Array,
@@ -145,7 +156,7 @@ def actor_loss(
     Adv: Array,
 ) -> Scalar:
 
-    new_Logit = actor_apply(params, S)
+    new_Logit = actor_apply(params, rng, S)
     new_Prob = jax.nn.softmax(new_Logit)
     new_Prob_a = jnp.take_along_axis(new_Prob, A, axis=-1)
     new_Logp = jnp.log(new_Prob_a)
@@ -161,10 +172,10 @@ def actor_loss(
 
 
 def critic_loss(
-    params: hk.Params, critic_apply: Callable, S: Array, Discount_R: Array
+    params: hk.Params, rng: PRNGKey, critic_apply: Callable, S: Array, Discount_R: Array
 ) -> Scalar:
 
-    V = critic_apply(params, S)
+    V = critic_apply(params, rng, S)
     Loss = jnp.square(V - Discount_R)
 
     return jnp.mean(Loss)
@@ -172,6 +183,7 @@ def critic_loss(
 
 def ppo_loss(
     params: hk.Params,
+    rng: PRNGKey,
     actor_apply: Callable,
     critic_apply: Callable,
     epsilon: float,
@@ -182,8 +194,10 @@ def ppo_loss(
     Discount_R: Array,
 ) -> Scalar:
 
-    a_loss = actor_loss(params, actor_apply, epsilon, S, A, Logp, Adv)
+    rng1, rng2 = jrng.split(rng, 2)
 
-    c_loss = critic_loss(params, critic_apply, S, Discount_R)
+    a_loss = actor_loss(params, rng1, actor_apply, epsilon, S, A, Logp, Adv)
+
+    c_loss = critic_loss(params, rng2, critic_apply, S, Discount_R)
 
     return a_loss + c_loss

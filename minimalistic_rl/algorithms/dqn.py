@@ -49,16 +49,17 @@ class DQN(Base):
 
     def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, None]:
         """Performs an action in the environment"""
+
         rng1, rng2 = jrng.split(rng, 2)
 
         epsilon = self.config["epsilon"]
         params = self.params
 
         S = jnp.expand_dims(s, axis=0)
-        Q = self.critic_apply(params, S)
+        Q = self.critic_apply(params, rng1, S)
 
         a_greedy = jnp.argmax(Q, axis=-1)
-        a_random = jrng.choice(key=rng1, a=jnp.arange(Q.shape[-1]))
+        a_random = jrng.choice(key=rng2, a=jnp.arange(Q.shape[-1]))
 
         if jrng.uniform(rng2) > epsilon:
             a = a_greedy
@@ -69,6 +70,9 @@ class DQN(Base):
 
     def improve(self):
         """Performs n_train_steps training loops"""
+
+        self.rng, rng1, rng2 = jrng.split(self.rng, 3)
+
         batch_size = self.config["batch_size"]
 
         Transition = self.buffer.sample(batch_size=batch_size)
@@ -77,7 +81,9 @@ class DQN(Base):
         n_batch = len(S) // batch_size
 
         gamma = self.config["gamma"]
-        Target = compute_Target(self.params, self.critic_apply, gamma, R, Done, S_next)
+        Target = compute_Target(
+            self.params, rng1, self.critic_apply, gamma, R, Done, S_next
+        )
 
         n_train_steps = self.config["n_train_steps"]
         for _ in range(n_train_steps):
@@ -87,16 +93,17 @@ class DQN(Base):
                 _A = A[idx]
 
                 loss, grads = jax.value_and_grad(critic_loss)(
-                    self.params, self.critic_apply, Target, _S, _A
+                    self.params, rng2, self.critic_apply, Target, _S, _A
                 )
                 self.params, self.opt_state = apply_updates(
                     self.optimizer, self.params, self.opt_state, grads
                 )
 
 
-@functools.partial(jax.jit, static_argnums=(1, 2))
+@functools.partial(jax.jit, static_argnums=(2, 3))
 def compute_Target(
     params: hk.Params,
+    rng: PRNGKey,
     critic_apply: Callable,
     gamma: float,
     R: Array,
@@ -105,7 +112,7 @@ def compute_Target(
 ) -> Array:
     """Computes the 1-step boostrapped value, DQN style"""
 
-    Q_next = critic_apply(params, S_next)
+    Q_next = critic_apply(params, rng, S_next)
     nDone = jnp.where(Done, 0.0, 1.0)
 
     Target = R
@@ -114,9 +121,10 @@ def compute_Target(
     return Target
 
 
-@functools.partial(jax.jit, static_argnums=(1))
+@functools.partial(jax.jit, static_argnums=(2))
 def critic_loss(
     params: hk.Params,
+    rng: PRNGKey,
     critic_apply: Callable,
     Target: Array,
     S: Array,
@@ -124,7 +132,7 @@ def critic_loss(
 ) -> Scalar:
     """Computes the critic loss, DQN style"""
 
-    Q = critic_apply(params, S)
+    Q = critic_apply(params, rng, S)
     Q_a = jnp.take_along_axis(Q, A, axis=-1)
 
     TD_error = jnp.square(Q_a - Target)
