@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_namespace_packages
 
 with open("requirements.txt", "r") as f:
     requirements = [package.replace("\n", "") for package in f.readlines()]
@@ -10,7 +10,7 @@ setup(
     author="Raffael Bolla Di Lorenzo",
     author_email="raffaelbdl@gmail.com",
     # Needed to actually package something
-    packages=["minimalistic_rl"],
+    packages=find_namespace_packages(),
     # Needed for dependencies
     install_requires=requirements[1:],
     dependency_links=requirements[:1],
