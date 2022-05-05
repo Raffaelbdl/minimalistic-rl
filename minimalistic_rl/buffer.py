@@ -1,5 +1,5 @@
 from collections import deque
-from dataclasses import field
+from dataclasses import dataclass, field
 import random
 from typing import Optional, Tuple
 
@@ -33,13 +33,6 @@ def from_singles(s, a, r, done, s_next, logp=Optional[None]) -> TransitionBatch:
     return TransitionBatch(**cls_kwargs)
 
 
-def to_tuple(transition: TransitionBatch) -> Tuple[Array]:
-    _tmp = []
-    for k in transition.__annotations__.keys():
-        _tmp.append(transition[k])
-    return tuple(_tmp)
-
-
 class Buffer:
     def __init__(self, capacity):
         self.capacity = capacity
@@ -51,11 +44,11 @@ class Buffer:
     def add(self, transition: TransitionBatch):
         self.storage.extend([transition])
 
-    def sample(self, batch_size):
+    def sample(self, batch_size: int) -> TransitionBatch:
         transitions = random.sample(self.storage, batch_size)
         return jax.tree_util.tree_map(lambda *leaves: np.stack(leaves), *transitions)
 
-    def sample_all(self):
+    def sample_all(self) -> TransitionBatch:
         return jax.tree_util.tree_map(lambda *leaves: np.stack(leaves), *self.storage)
 
     def __str__(self):
