@@ -42,10 +42,8 @@ class PPO(Base):
 
         self.actor_transformed = actor_transformed
         actor_params = self.actor_transformed.init(rng1, dummy_S)
-
         self.critic_transformed = critic_transformed
         critic_params = self.critic_transformed.init(rng2, dummy_S)
-
         self.params = hk.data_structures.merge(actor_params, critic_params)
 
         learning_rate = self.config["learning_rate"]
@@ -55,29 +53,21 @@ class PPO(Base):
         self.actor_apply = jax.jit(self.actor_transformed.apply)
         self.critic_apply = jax.jit(self.critic_transformed.apply)
 
-    def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[Scalar, Scalar]:
-        """Performs an action in the environment
-
-        Args:
-            rng (PRNGKey)
-            s (ArrayNumpy) [s]
-
-        Returns:
-            a (Scalar): action to perform in the env
-            logp (Scalar): logp corresponding to action taken
-        """
+    def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, Scalar]:
+        """Performs an action in the environment"""
         params = self.params
-        S = jnp.expand_dims(s, axis=0)
 
+        S = jnp.expand_dims(s, axis=0)
         logit = jnp.squeeze(self.actor_apply(params, S), axis=0)
         prob = jax.nn.softmax(logit)
 
         a = jrng.choice(rng, jnp.arange(0, self.num_actions), p=prob)
         logp = jnp.log(prob[a])
+
         return int(a), logp
 
     def improve(self):
-        """Performs a training loop"""
+        """Performs n_train_steps training loops"""
         batch_size = self.config["batch_size"]
 
         Transition = self.buffer.sample_all()
