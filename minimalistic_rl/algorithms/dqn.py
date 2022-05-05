@@ -11,7 +11,6 @@ import numpy as np
 import optax
 
 from minimalistic_rl.algorithms import Base
-from minimalistic_rl.buffer import to_tuple
 from minimalistic_rl.utils.updater import apply_updates
 
 Array = chex.Array
@@ -76,7 +75,7 @@ class DQN(Base):
         batch_size = self.config["batch_size"]
 
         Transition = self.buffer.sample(batch_size=batch_size)
-        S, A, R, Done, S_next, _ = to_tuple(Transition)
+        S, A, R, Done, S_next, _ = Transition.to_tuple()
 
         n_batch = len(S) // batch_size
 
