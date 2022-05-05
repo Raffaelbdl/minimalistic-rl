@@ -13,7 +13,7 @@ The goal of this project is to make simple, efficient, user-friendly RL algorith
 ## Handle `chex.dataclass` as observation
 
 In some cases, custom observations may be necessary. Those can be automatically handled given a certain syntax.
-The hk.Transformed given to the agent should also handle the custom observation.
+The hk.Transformed given to the agent should be designed to also handle the custom observation.
 
 ```python
 import chex
