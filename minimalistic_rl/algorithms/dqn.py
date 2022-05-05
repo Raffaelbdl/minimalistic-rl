@@ -10,18 +10,18 @@ from jax import numpy as jnp, random as jrng
 import numpy as np
 import optax
 
-from minimalistic_rl import Buffer
 from minimalistic_rl.algorithms import Base
 from minimalistic_rl.utils.updater import apply_updates
 
 Array = chex.Array
-ArrayNumpy = chex.ArrayNumpy 
+ArrayNumpy = chex.ArrayNumpy
 PRNGKey = chex.PRNGKey
 Scalar = chex.Scalar
 
 
 class DQN(Base):
     """Most basic DQN variant"""
+
     policy = "off"
 
     def __init__(
@@ -29,18 +29,16 @@ class DQN(Base):
         config: dict,
         rng: PRNGKey,
         env: gym.Env,
-        critic_transformed: hk.Transformed
+        critic_transformed: hk.Transformed,
     ) -> None:
+        super().__init__(config=config, rng=rng)
+        self.rng, rng1 = jrng.split(self.rng, 2)
 
-        self.config = config
-        
-        self.rng = rng
-        dummy_o = env.observation_space.sample()
+        dummy_s = env.observation_space.sample()
 
         self.critic_transformed = critic_transformed
         self.params = self.critic_transformed.init(
-            self.rng, 
-            jnp.expand_dims(dummy_o, axis=0)
+            rng1, jnp.expand_dims(dummy_s, axis=0)
         )
 
         learning_rate = self.config["learning_rate"]
@@ -49,20 +47,13 @@ class DQN(Base):
 
         self.critic_apply = jax.jit(self.critic_transformed.apply)
 
-        capacity = self.config["capacity"]
-        self.buffer = Buffer(capacity=capacity)
-    
-    def act(
-        self,
-        rng: PRNGKey,
-        s: ArrayNumpy
-    ) -> Tuple[Scalar, None]: 
+    def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[Scalar, None]:
         """Performs an action in the environment
-        
+
         Args:
             rng (PRNGKey)
-            o (ArrayNumpy) [o]
-        
+            s (ArrayNumpy) [s]
+
         Returns:
             An action (int) to perform in the environment
         """
@@ -75,18 +66,15 @@ class DQN(Base):
         Q = self.critic_apply(params, S)
 
         a_greedy = jnp.argmax(Q, axis=-1)
-        a_random = jrng.choice(
-            key=rng1,
-            a=jnp.arange(Q.shape[-1])
-        )
+        a_random = jrng.choice(key=rng1, a=jnp.arange(Q.shape[-1]))
 
         if jrng.uniform(rng2) > epsilon:
             a = a_greedy
         else:
             a = a_random
-        
+
         return int(a), None
-        
+
     def improve(self):
         """Performs a single training step"""
         batch_size = self.config["batch_size"]
@@ -95,40 +83,20 @@ class DQN(Base):
         n_batch = len(S) // batch_size
 
         gamma = self.config["gamma"]
-        Target = compute_Target(
-            self.params,
-            self.critic_apply,
-            gamma,
-            R,
-            Done,
-            S_next
-        )
+        Target = compute_Target(self.params, self.critic_apply, gamma, R, Done, S_next)
 
         for i in range(n_batch):
-            idx = np.array(
-                range(
-                    i * batch_size,
-                    (i + 1) * batch_size
-                )
-            )
+            idx = np.array(range(i * batch_size, (i + 1) * batch_size))
             _S = S[idx]
             _A = A[idx]
 
-            loss, grads = jax.value_and_grad(
-                critic_loss
-            )(
-                self.params,
-                self.critic_apply,
-                Target,
-                _S,
-                _A
+            loss, grads = jax.value_and_grad(critic_loss)(
+                self.params, self.critic_apply, Target, _S, _A
             )
             self.params, self.opt_state = apply_updates(
-            self.optimizer, 
-            self.params,
-            self.opt_state,
-            grads
-        )
+                self.optimizer, self.params, self.opt_state, grads
+            )
+
 
 @functools.partial(jax.jit, static_argnums=(1, 2))
 def compute_Target(
@@ -136,18 +104,19 @@ def compute_Target(
     critic_apply: Callable,
     gamma: float,
     R: Array,
-    Done: Array, 
-    S_next: Array
+    Done: Array,
+    S_next: Array,
 ) -> Array:
     """Computes the 1-step boostrapped value, DQN style"""
 
     Q_next = critic_apply(params, S_next)
-    nDone = jnp.where(Done, 0., 1.)
+    nDone = jnp.where(Done, 0.0, 1.0)
 
     Target = R
     Target += gamma * nDone * jnp.max(Q_next, axis=-1)[..., None]
 
     return Target
+
 
 @functools.partial(jax.jit, static_argnums=(1))
 def critic_loss(
@@ -166,4 +135,3 @@ def critic_loss(
     TD_error = jnp.square(Q_a - Target)
 
     return jnp.mean(TD_error)
-

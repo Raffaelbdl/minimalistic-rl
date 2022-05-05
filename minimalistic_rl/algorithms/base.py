@@ -1,4 +1,3 @@
-
 from abc import abstractmethod
 from typing import Tuple, Union
 
@@ -13,15 +12,11 @@ Scalar = chex.Scalar
 
 class Base:
     """Base class for RL algorithms"""
-    policy: str = "none" # "off", "on"
 
-    def __init__(
-        self,
-        config: dict,
-        rng: PRNGKey,
-        **kwargs
-    ) -> None:
-        
+    policy: str = "none"  # "off", "on"
+
+    def __init__(self, config: dict, rng: PRNGKey, **kwargs) -> None:
+
         self.config = config
 
         self.rng = rng
@@ -37,7 +32,7 @@ class Base:
     ) -> Tuple[Scalar, Union[Scalar, None]]:
         """Performs an action in the environment"""
         raise NotImplementedError("Act method must be implemented")
-    
+
     @abstractmethod
     def improve(self) -> None:
         """Performs a single training step"""
