@@ -1,9 +1,9 @@
-box2d
-gym
-numpy
-pygame
+box2d >= 2.3.10
+gym >= 0.23.1
+numpy >= 1.22.3
+pygame >= 2.1.2
 
 -f https://storage.googleapis.com/jax-releases/jax_releases.html
-chex
-dm-haiku
-optax
+chex >= 0.1.3
+dm-haiku >= 0.0.6
+optax >= 0.1.2
