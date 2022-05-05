@@ -34,8 +34,8 @@ class DQN(Base):
         super().__init__(config=config, rng=rng)
         self.rng, rng1 = jrng.split(self.rng, 2)
 
-        dummy_s = env.observation_space.sample()
-        dummy_S = jnp.expand_dims(dummy_s, axis=0)
+        dummy_s = env.reset()
+        dummy_S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), dummy_s)
 
         self.critic_transformed = critic_transformed
         self.params = self.critic_transformed.init(rng1, dummy_S, True)
@@ -54,7 +54,7 @@ class DQN(Base):
         epsilon = self.config["epsilon"]
         params = self.params
 
-        S = jnp.expand_dims(s, axis=0)
+        S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
         Q = self.critic_apply(params, rng1, S)
 
         a_greedy = jnp.argmax(Q, axis=-1)
@@ -77,7 +77,7 @@ class DQN(Base):
         Transition = self.buffer.sample(batch_size=batch_size)
         S, A, R, Done, S_next, _ = Transition.to_tuple()
 
-        n_batch = len(S) // batch_size
+        n_batch = len(R) // batch_size
 
         gamma = self.config["gamma"]
         Target = compute_Target(
@@ -88,7 +88,7 @@ class DQN(Base):
         for _ in range(n_train_steps):
             for i in range(n_batch):
                 idx = np.array(range(i * batch_size, (i + 1) * batch_size))
-                _S = S[idx]
+                _S = jax.tree_map(lambda x: x[idx], S)
                 _A = A[idx]
 
                 loss, grads = jax.value_and_grad(critic_loss)(

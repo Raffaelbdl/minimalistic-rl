@@ -35,8 +35,8 @@ class PPO(Base):
         super().__init__(config=config, rng=rng)
         self.rng, rng1, rng2 = jrng.split(self.rng, 3)
 
-        dummy_s = env.observation_space.sample()
-        dummy_S = jnp.expand_dims(dummy_s, axis=0)
+        dummy_s = env.reset()
+        dummy_S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), dummy_s)
         self.num_actions = env.action_space.n
 
         self.actor_transformed = actor_transformed
@@ -59,7 +59,7 @@ class PPO(Base):
 
         params = self.params
 
-        S = jnp.expand_dims(s, axis=0)
+        S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
         logit = jnp.squeeze(self.actor_apply(params, rng1, S), axis=0)
         prob = jax.nn.softmax(logit)
 
@@ -78,7 +78,7 @@ class PPO(Base):
         Transition = self.buffer.sample_all()
         S, A, R, Done, S_next, Logp = Transition.to_tuple()
 
-        n_batch = len(S) // batch_size
+        n_batch = len(R) // batch_size
 
         gamma = self.config["gamma"]
         Discount_R = compute_Discount_R(gamma, R, Done)
@@ -91,7 +91,7 @@ class PPO(Base):
                 rng2, _rng2 = jrng.split(rng2, 2)
 
                 idx = np.array(range(i * batch_size, (i + 1) * batch_size))
-                _S = S[idx]
+                _S = jax.tree_map(lambda x: x[idx], S)
                 _A = A[idx]
                 _Logp = Logp[idx]
                 _Adv = Adv[idx]

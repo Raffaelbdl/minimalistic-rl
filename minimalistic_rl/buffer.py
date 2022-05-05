@@ -59,8 +59,5 @@ class Buffer:
 
 
 def as_batch(x: Numeric) -> ArrayNumpy:
-    if not isinstance(x, ArrayNumpy):
-        x = np.array(x)
-    if not len(x.shape) >= 1:
-        x = np.expand_dims(x, axis=0)
+    x = jax.tree_map(lambda y: np.expand_dims(y, axis=0), x)
     return x
