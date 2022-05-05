@@ -49,8 +49,8 @@ class PPO(Base):
         self.optimizer = optax.adam(learning_rate)
         self.opt_state = self.optimizer.init(self.params)
 
-        self.actor_apply = jax.jit(self.actor_transformed.apply)
-        self.critic_apply = jax.jit(self.critic_transformed.apply)
+        self.actor_apply = self.actor_transformed.apply
+        self.critic_apply = self.critic_transformed.apply
 
     def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, Scalar]:
         """Performs an action in the environment"""
@@ -60,7 +60,7 @@ class PPO(Base):
         params = self.params
 
         S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
-        logit = jnp.squeeze(self.actor_apply(params, rng1, S), axis=0)
+        logit = jnp.squeeze(jax.jit(self.actor_apply)(params, rng1, S), axis=0)
         prob = jax.nn.softmax(logit)
 
         a = jrng.choice(rng2, jnp.arange(0, self.num_actions), p=prob)
@@ -180,6 +180,7 @@ def critic_loss(
     return jnp.mean(Loss)
 
 
+@functools.partial(jax.jit, static_argnums=(2, 3))
 def ppo_loss(
     params: hk.Params,
     rng: PRNGKey,
