@@ -44,7 +44,7 @@ class DQN(Base):
         self.optimizer = optax.adam(learning_rate)
         self.opt_state = self.optimizer.init(self.params)
 
-        self.critic_apply = jax.jit(self.critic_transformed.apply)
+        self.critic_apply = self.critic_transformed.apply
 
     def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, None]:
         """Performs an action in the environment"""
@@ -55,7 +55,7 @@ class DQN(Base):
         params = self.params
 
         S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
-        Q = self.critic_apply(params, rng1, S)
+        Q = jax.jit(self.critic_apply)(params, rng1, S)
 
         a_greedy = jnp.argmax(Q, axis=-1)
         a_random = jrng.choice(key=rng2, a=jnp.arange(Q.shape[-1]))
