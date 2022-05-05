@@ -39,7 +39,7 @@ class DQN(Base):
         dummy_S = jnp.expand_dims(dummy_s, axis=0)
 
         self.critic_transformed = critic_transformed
-        self.params = self.critic_transformed.init(rng1, dummy_S)
+        self.params = self.critic_transformed.init(rng1, dummy_S, True)
 
         learning_rate = self.config["learning_rate"]
         self.optimizer = optax.adam(learning_rate)
@@ -132,7 +132,7 @@ def critic_loss(
 ) -> Scalar:
     """Computes the critic loss, DQN style"""
 
-    Q = critic_apply(params, rng, S)
+    Q = critic_apply(params, rng, S, True)
     Q_a = jnp.take_along_axis(Q, A, axis=-1)
 
     TD_error = jnp.square(Q_a - Target)

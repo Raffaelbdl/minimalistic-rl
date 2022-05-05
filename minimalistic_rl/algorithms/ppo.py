@@ -41,9 +41,9 @@ class PPO(Base):
         self.num_actions = env.action_space.n
 
         self.actor_transformed = actor_transformed
-        actor_params = self.actor_transformed.init(rng1, dummy_S)
+        actor_params = self.actor_transformed.init(rng1, dummy_S, True)
         self.critic_transformed = critic_transformed
-        critic_params = self.critic_transformed.init(rng2, dummy_S)
+        critic_params = self.critic_transformed.init(rng2, dummy_S, True)
         self.params = hk.data_structures.merge(actor_params, critic_params)
 
         learning_rate = self.config["learning_rate"]
@@ -156,7 +156,7 @@ def actor_loss(
     Adv: Array,
 ) -> Scalar:
 
-    new_Logit = actor_apply(params, rng, S)
+    new_Logit = actor_apply(params, rng, S, True)
     new_Prob = jax.nn.softmax(new_Logit)
     new_Prob_a = jnp.take_along_axis(new_Prob, A, axis=-1)
     new_Logp = jnp.log(new_Prob_a)
@@ -175,7 +175,7 @@ def critic_loss(
     params: hk.Params, rng: PRNGKey, critic_apply: Callable, S: Array, Discount_R: Array
 ) -> Scalar:
 
-    V = critic_apply(params, rng, S)
+    V = critic_apply(params, rng, S, True)
     Loss = jnp.square(V - Discount_R)
 
     return jnp.mean(Loss)
