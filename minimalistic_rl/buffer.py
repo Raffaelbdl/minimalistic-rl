@@ -59,5 +59,14 @@ class Buffer:
 
 
 def as_batch(x: Numeric) -> ArrayNumpy:
-    x = jax.tree_map(lambda y: np.expand_dims(y, axis=0), x)
+    def check_shape(y: Numeric):
+        if isinstance(y, (np.ndarray)):
+            if len(y.shape) == 0:
+                return np.expand_dims(y, axis=0)
+            else:
+                return y
+        else:
+            return np.expand_dims(y, axis=0)
+
+    x = jax.tree_map(lambda y: check_shape(y), x)
     return x
