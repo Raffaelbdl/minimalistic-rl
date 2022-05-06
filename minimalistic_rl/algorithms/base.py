@@ -21,7 +21,7 @@ class Base:
 
         self.rng = rng
 
-        capacity = config["capacity"]
+        capacity = config["T"] if self.policy == "on" else config["capacity"]
         self.buffer = Buffer(capacity)
 
     @abstractmethod
