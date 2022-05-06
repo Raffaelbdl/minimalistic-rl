@@ -11,7 +11,7 @@ import numpy as np
 import optax
 
 from minimalistic_rl.algorithms import Base
-from minimalistic_rl import apply_updates
+from minimalistic_rl.updater import apply_updates
 
 Array = chex.Array
 ArrayNumpy = chex.ArrayNumpy
