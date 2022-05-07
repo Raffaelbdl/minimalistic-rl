@@ -46,11 +46,16 @@ def train(
     logs["ep_reward"] = 0.0
 
     s = env.reset()
-    for step in range(n_steps):
+    for step in range(1, n_steps + 1):
+        logs["step_count"] = step
+        for c in callbacks:
+            c.at_step_start(logs)
+
         rng, rng1 = jrng.split(rng, 2)
 
         a, logp = agent.act(rng=rng1, s=s)
         s_next, r, done, _ = env.step(action=a)
+        logs["step_reward"] = r
 
         transition = from_singles(s, a, r, done, s_next, logp)
         agent.buffer.add(transition=transition)
@@ -69,6 +74,9 @@ def train(
         else:
             logs["ep_reward"] += r
             s = s_next
+
+        for c in callbacks:
+            c.at_step_end(logs)
 
     for c in callbacks:
         c.at_train_end(logs)
@@ -95,6 +103,6 @@ def init_callbacks(
     config: dict, callbacks: Optional[List[Callback]] = None
 ) -> List[Callback]:
     callbacks = callbacks if callbacks else []
-    callbacks.append(Logger(config["verbose"]))
+    callbacks.append(Logger(config))
 
     return callbacks
