@@ -93,7 +93,7 @@ def on_policy_improve_condition(step: int, agent: algo.Base, T: int) -> bool:
 
 
 def init_logs(config: dict, agent: algo.Base) -> dict:
-    logs = {"algo": agent.algo}
+    logs = {"algo": agent.algo, "policy": agent.policy}
     logs.update(config)
 
     return logs
