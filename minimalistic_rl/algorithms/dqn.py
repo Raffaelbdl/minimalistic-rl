@@ -23,6 +23,7 @@ class DQN(Base):
     """Most basic DQN variant"""
 
     policy = "off"
+    algo = "dqn"
 
     def __init__(
         self,

@@ -13,7 +13,8 @@ Scalar = chex.Scalar
 class Base:
     """Base class for RL algorithms"""
 
-    policy: str = "none"  # "off", "on"
+    policy = "none"  # "off", "on"
+    algo = "none"
 
     def __init__(self, config: dict, rng: PRNGKey, **kwargs) -> None:
 

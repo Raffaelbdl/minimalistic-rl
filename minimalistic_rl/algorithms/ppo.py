@@ -23,6 +23,7 @@ class PPO(Base):
     """Most basic PPO variant"""
 
     policy = "on"
+    algo = "ppo"
 
     def __init__(
         self,
