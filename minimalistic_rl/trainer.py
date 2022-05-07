@@ -1,5 +1,6 @@
 """Simple training loop"""
 import functools
+from typing import List, Optional
 
 import chex
 import gym
@@ -7,6 +8,7 @@ from jax import random as jrng
 
 from minimalistic_rl import algorithms as algo
 from minimalistic_rl.buffer import from_singles
+from minimalistic_rl.callbacks import Callback, Logger
 
 
 Array = chex.Array
@@ -20,7 +22,13 @@ def train(
     rng: PRNGKey,
     agent: algo.Base,
     env: gym.Env,
+    callbacks: Optional[List[Callback]] = None,
 ):
+    logs = init_logs(config, agent)
+    callbacks = init_callbacks(config, callbacks)
+
+    for c in callbacks:
+        c.at_train_start(logs)
 
     n_steps = config["n_steps"]
     if agent.policy == "off":
@@ -34,15 +42,20 @@ def train(
             on_policy_improve_condition, T=config["T"]
         )
 
-    ep_count = 0
-    ep_r = 0.0
+    logs["ep_count"] = 0
+    logs["ep_reward"] = 0.0
 
     s = env.reset()
-    for step in range(n_steps):
+    for step in range(1, n_steps + 1):
+        logs["step_count"] = step
+        for c in callbacks:
+            c.at_step_start(logs)
+
         rng, rng1 = jrng.split(rng, 2)
 
         a, logp = agent.act(rng=rng1, s=s)
         s_next, r, done, _ = env.step(action=a)
+        logs["step_reward"] = r
 
         transition = from_singles(s, a, r, done, s_next, logp)
         agent.buffer.add(transition=transition)
@@ -51,13 +64,22 @@ def train(
             agent.improve()
 
         if done:
-            ep_count += 1
-            print(f"{ep_count} -> {ep_r}")
+            logs["ep_count"] += 1
+
+            for c in callbacks:
+                c.at_episode_end(logs)
+
             s = env.reset()
-            ep_r = 0.0
+            logs["ep_reward"] = 0.0
         else:
-            ep_r += r
+            logs["ep_reward"] += r
             s = s_next
+
+        for c in callbacks:
+            c.at_step_end(logs)
+
+    for c in callbacks:
+        c.at_train_end(logs)
 
 
 def off_policy_improve_condition(
@@ -68,3 +90,19 @@ def off_policy_improve_condition(
 
 def on_policy_improve_condition(step: int, agent: algo.Base, T: int) -> bool:
     return len(agent.buffer) >= T
+
+
+def init_logs(config: dict, agent: algo.Base) -> dict:
+    logs = {"algo": agent.algo, "policy": agent.policy}
+    logs.update(config)
+
+    return logs
+
+
+def init_callbacks(
+    config: dict, callbacks: Optional[List[Callback]] = None
+) -> List[Callback]:
+    callbacks = callbacks if callbacks else []
+    callbacks.append(Logger(config))
+
+    return callbacks
