@@ -4,7 +4,7 @@ import logging
 from minimalistic_rl.callbacks.callback import Callback
 
 DEFAULT_FMT = "%(asctime)s | %(levelname)s | %(message)s"
-STEP_FMT = "%(asctime)s | STEP | %(message)s"
+STEP_FMT = "%(asctime)s | STEP    | %(message)s"
 EPISODE_FMT = "%(asctime)s | EPISODE | %(message)s"
 
 
