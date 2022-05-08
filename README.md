@@ -11,7 +11,6 @@ I will keep adding features to this repo along with my own work.
 - [x] PPO
 
 ## Cool features
-This project comes not only with algorithms but also with cool features that I find useful.
 
 ### Handle `chex.dataclass` as observation
 
