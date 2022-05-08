@@ -21,4 +21,5 @@ def critic_fn(S, is_training: bool = False):
 
 agent = algo.DQN(rng=jrng.PRNGKey(0), env=env, critic_transformed=critic_fn)
 
+
 train(jrng.PRNGKey(1), agent, env)
