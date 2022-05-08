@@ -1,6 +1,7 @@
 """Simple DQN implementation in JAX"""
 import functools
-from typing import Callable, Tuple
+import os
+from typing import Callable, Optional, Tuple
 
 import chex
 import gym
@@ -9,7 +10,9 @@ import jax
 from jax import numpy as jnp, random as jrng
 import numpy as np
 import optax
+import yaml
 
+from minimalistic_rl import PATH_TO_PACKAGE
 from minimalistic_rl.algorithms import Base
 from minimalistic_rl.updater import apply_updates
 
@@ -17,6 +20,9 @@ Array = chex.Array
 ArrayNumpy = chex.ArrayNumpy
 PRNGKey = chex.PRNGKey
 Scalar = chex.Scalar
+
+with open(os.path.join(PATH_TO_PACKAGE, "configs/dqn.yaml"), "r") as c:
+    default_config = yaml.load(c, yaml.FullLoader)
 
 
 class DQN(Base):
@@ -27,12 +33,15 @@ class DQN(Base):
 
     def __init__(
         self,
-        config: dict,
         rng: PRNGKey,
         env: gym.Env,
         critic_transformed: hk.Transformed,
+        config: Optional[dict] = None,
     ) -> None:
-        super().__init__(config=config, rng=rng)
+        _config: dict = default_config
+        if config is not None:
+            _config.update(config)
+        super().__init__(config=_config, rng=rng)
         self.rng, rng1 = jrng.split(self.rng, 2)
 
         dummy_s = env.reset()

@@ -18,19 +18,19 @@ Scalar = chex.Scalar
 
 
 def train(
-    config: dict,
     rng: PRNGKey,
     agent: algo.Base,
     env: gym.Env,
     callbacks: Optional[List[Callback]] = None,
 ):
-    logs = init_logs(config, agent)
+    config = agent.config
+    logs = init_logs(agent)
     callbacks = init_callbacks(config, callbacks)
 
     for c in callbacks:
         c.at_train_start(logs)
 
-    n_steps = config["n_steps"]
+    n_steps = logs["n_steps"]
     if agent.policy == "off":
         improve_condition = functools.partial(
             off_policy_improve_condition,
@@ -44,8 +44,7 @@ def train(
 
     logs["ep_count"] = 0
     logs["ep_reward"] = 0.0
-
-    s = env.reset()
+    s = env.reset(seed=int(rng[0]))
     for step in range(1, n_steps + 1):
         logs["step_count"] = step
         for c in callbacks:
@@ -69,7 +68,7 @@ def train(
             for c in callbacks:
                 c.at_episode_end(logs)
 
-            s = env.reset()
+            s = env.reset(seed=int(rng[0]))
             logs["ep_reward"] = 0.0
         else:
             logs["ep_reward"] += r
@@ -92,9 +91,9 @@ def on_policy_improve_condition(step: int, agent: algo.Base, T: int) -> bool:
     return len(agent.buffer) >= T
 
 
-def init_logs(config: dict, agent: algo.Base) -> dict:
+def init_logs(agent: algo.Base) -> dict:
     logs = {"algo": agent.algo, "policy": agent.policy}
-    logs.update(config)
+    logs.update(agent.config)
 
     return logs
 
