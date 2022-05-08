@@ -3,14 +3,17 @@ RL algorithms made simple in JAX
 
 ![status](https://img.shields.io/badge/status-work%20in%20progress-red)
 
-The goal of this project is to make simple, efficient, user-friendly RL algorithms in JAX using HAIKU
+The goal of this project is to make simple, efficient, user-friendly RL algorithms in JAX using HAIKU.
+I will keep adding features to this repo along with my own work.
 
 ## Implemented algorithms
 - [x] DQN
 - [x] PPO
 
+## Cool features
+This project comes not only with algorithms but also with cool features that I find useful.
 
-## Handle `chex.dataclass` as observation
+### Handle `chex.dataclass` as observation
 
 In some cases, custom observations may be necessary. Those can be automatically handled given a certain syntax.
 The hk.Transformed given to the agent should be designed to also handle the custom observation.
@@ -39,7 +42,7 @@ env = CustomWrapper(env)
 
 ## Installation 
 
-Simply run (Linux Only):
+(Linux Only):
 
 ```bash
 pip install git+https://github.com/Raffaelbdl/minimalistic-rl
