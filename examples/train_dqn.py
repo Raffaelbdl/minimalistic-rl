@@ -6,6 +6,7 @@ from jax import numpy as jnp, random as jrng
 from minimalistic_rl import algorithms as algo
 from minimalistic_rl.trainer import train
 
+
 env = gym.make("CartPole-v1")
 
 
