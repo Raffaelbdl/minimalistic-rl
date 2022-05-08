@@ -1,7 +1,7 @@
 """Simple PPO implementation in JAX"""
 import functools
 import os
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 import chex
 import gym
@@ -33,14 +33,15 @@ class PPO(Base):
 
     def __init__(
         self,
-        config: dict,
         rng: PRNGKey,
         env: gym.Env,
         actor_transformed: hk.Transformed,
         critic_transformed: hk.Transformed,
+        config: Optional[dict] = None,
     ) -> None:
         _config: dict = default_config
-        _config.update(config)
+        if config is not None:
+            _config.update(config)
         super().__init__(config=_config, rng=rng)
         self.rng, rng1, rng2 = jrng.split(self.rng, 3)
 
