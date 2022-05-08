@@ -1,0 +1,20 @@
+algo: "ppo"
+policy: "on"
+
+# algo
+epsilon: 0.1
+gamma: 0.99
+
+# buffer
+T: 512
+
+# learning
+batch_size: 128
+learning_rate: 0.001
+improve_cycle: 1 # improved every x steps
+n_train_steps: 1 # number of training steps
+
+# environment
+n_steps: 500000
+episode_cycle_len: 10
+verbose: 2
