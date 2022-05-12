@@ -14,6 +14,7 @@ setup(
     # Needed for dependencies
     install_requires=requirements[1:],
     dependency_links=requirements[:1],
+    package_data={"configs": "*.yaml"},
     # *strongly* suggested for sharing
     version="0.0.1",
     # The license can be anything you like
