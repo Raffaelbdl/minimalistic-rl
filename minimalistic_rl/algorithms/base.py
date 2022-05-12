@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import Tuple, Union
 
 import chex
+from jax import random as jrng
 
 from minimalistic_rl.buffer import Buffer
 
@@ -20,10 +21,10 @@ class Base:
 
         self.config = config
 
-        self.rng = rng
+        self.rng, rng1 = jrng.split(rng, 2)
 
         capacity = config["T"] if self.policy == "on" else config["capacity"]
-        self.buffer = Buffer(capacity)
+        self.buffer = Buffer(capacity, seed=int(rng1[0]))
 
     @abstractmethod
     def act(

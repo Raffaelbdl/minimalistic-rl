@@ -34,8 +34,9 @@ def from_singles(s, a, r, done, s_next, logp=Optional[None]) -> TransitionBatch:
 
 
 class Buffer:
-    def __init__(self, capacity):
+    def __init__(self, capacity, seed):
         self.capacity = capacity
+        random.seed(seed)
         self.clear()
 
     def clear(self):
