@@ -10,19 +10,15 @@ import jax
 from jax import numpy as jnp, random as jrng
 import numpy as np
 import optax
-import yaml
 
-from minimalistic_rl import PATH_TO_PACKAGE
 from minimalistic_rl.algorithms import Base
 from minimalistic_rl.updater import apply_updates
+from minimalistic_rl.algorithms.configs import DQN_CONFIG
 
 Array = chex.Array
 ArrayNumpy = chex.ArrayNumpy
 PRNGKey = chex.PRNGKey
 Scalar = chex.Scalar
-
-with open(os.path.join(PATH_TO_PACKAGE, "configs/dqn.yaml"), "r") as c:
-    default_config = yaml.load(c, yaml.FullLoader)
 
 
 class DQN(Base):
@@ -38,7 +34,7 @@ class DQN(Base):
         critic_transformed: hk.Transformed,
         config: Optional[dict] = None,
     ) -> None:
-        _config: dict = default_config
+        _config = DQN_CONFIG
         if config is not None:
             _config.update(config)
         super().__init__(config=_config, rng=rng)
