@@ -61,7 +61,7 @@ class Buffer:
 
 def as_batch(x: Numeric) -> ArrayNumpy:
     def check_shape(y: Numeric):
-        if isinstance(y, (np.ndarray)):
+        if isinstance(y, (ArrayNumpy, Array)):
             if len(y.shape) == 0:
                 return np.expand_dims(y, axis=0)
             else:
