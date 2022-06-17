@@ -22,6 +22,7 @@ def train(
     agent: algo.Base,
     env: gym.Env,
     callbacks: Optional[List[Callback]] = None,
+    render: bool = False,
 ):
     config = agent.config
     logs = init_logs(agent)
@@ -46,6 +47,9 @@ def train(
     logs["ep_reward"] = 0.0
     s = env.reset(seed=int(rng[0]))
     for step in range(1, n_steps + 1):
+        if render:
+            env.render()
+
         logs["step_count"] = step
         for c in callbacks:
             c.at_step_start(logs)
