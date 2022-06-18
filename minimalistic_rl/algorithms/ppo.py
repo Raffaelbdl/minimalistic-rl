@@ -1,20 +1,20 @@
-"""Simple PPO implementation in JAX"""
+"""Simple PPo implementation in JAX"""
 import functools
-import os
 from typing import Callable, Optional, Tuple
 
 import chex
 import gym
 import haiku as hk
 import jax
-from jax import numpy as jnp, random as jrng
-import numpy as np
+import jax.nn as nn
+import jax.numpy as jnp
+import jax.random as jrng
 import optax
-import yaml
+import rlax
 
 from minimalistic_rl.algorithms import Base
+from minimalistic_rl.buffer import TransitionBatch
 from minimalistic_rl.updater import apply_updates
-from minimalistic_rl.algorithms.configs import PPO_CONFIG
 
 Array = chex.Array
 ArrayNumpy = chex.ArrayNumpy
@@ -22,11 +22,30 @@ PRNGKey = chex.PRNGKey
 Scalar = chex.Scalar
 
 
-class PPO(Base):
-    """Most basic PPO variant"""
+def make_PPO_config(user_config: dict):
+    user_config = user_config if user_config is not None else {}
+    config = {
+        "algo": user_config.pop("algo", "ppo"),
+        "policy": user_config.pop("policy", "on"),
+        "discount": user_config.pop("discount", 0.99),
+        "epsilon": user_config.pop("epsilon", 0.1),
+        "lambda": user_config.pop("lambda", 0.95),
+        "critic_coef": user_config.pop("critic_coef", 0.5),
+        "entropy_coef": user_config.pop("entropy_coef", 0.01),
+        "T": user_config.pop("T", 512),
+        "batch_size": user_config.pop("batch_size", 128),
+        "learning_rate": user_config.pop("learning_rate", 2.5e-4),
+        "improve_cycle": user_config.pop("improve_cycle", 1),
+        "n_train_steps": user_config.pop("n_train_steps", 1),
+        "n_steps": user_config.pop("n_steps", int(1e6)),
+        "episode_cycle_len": user_config.pop("episode_cycle_len", 10),
+        "verbose": user_config.pop("verbose", 2),
+    }
+    return config
 
-    policy = "on"
-    algo = "ppo"
+
+class PPO(Base):
+    """Simple PPO"""
 
     def __init__(
         self,
@@ -36,86 +55,78 @@ class PPO(Base):
         critic_transformed: hk.Transformed,
         config: Optional[dict] = None,
     ) -> None:
-        _config: dict = PPO_CONFIG
-        if config is not None:
-            _config.update(config)
-        super().__init__(config=_config, rng=rng)
-        self.rng, rng1, rng2 = jrng.split(self.rng, 3)
+        config = make_PPO_config(config)
+        super().__init__(config=config, rng=rng)
+
+        self.rng, rng1, rng2 = jrng.split(rng, 3)
 
         dummy_s = env.reset()
         dummy_S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), dummy_s)
-        self.num_actions = env.action_space.n
 
-        self.actor_transformed = actor_transformed
-        actor_params = self.actor_transformed.init(rng1, dummy_S, True)
-        self.critic_transformed = critic_transformed
-        critic_params = self.critic_transformed.init(rng2, dummy_S, True)
-        self.params = hk.data_structures.merge(actor_params, critic_params)
+        self.actor_params = actor_transformed.init(rng1, dummy_S)
+        self.critic_params = critic_transformed.init(rng2, dummy_S)
+        self.params = hk.data_structures.merge(self.actor_params, self.critic_params)
 
         learning_rate = self.config["learning_rate"]
         self.optimizer = optax.adam(learning_rate)
         self.opt_state = self.optimizer.init(self.params)
 
-        self.actor_apply = self.actor_transformed.apply
-        self.critic_apply = self.critic_transformed.apply
+        self.actor_apply = actor_transformed.apply
+        self.critic_apply = critic_transformed.apply
 
-    def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, Scalar]:
+        self._discount = self.config["discount"]
+        self._epsilon = self.config["epsilon"]
+        self._lambda = self.config["lambda"]
+
+        self._critic_coef = self.config["critic_coef"]
+        self._entropy_coef = self.config["entropy_coef"]
+
+    def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, float]:
         """Performs an action in the environment"""
 
         rng1, rng2 = jrng.split(rng, 2)
 
-        params = self.params
-
         S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
-        logit = jnp.squeeze(jax.jit(self.actor_apply)(params, rng1, S), axis=0)
-        prob = jax.nn.softmax(logit)
+        logits = jax.jit(self.actor_apply)(self.params, rng1, S)[0]
+        probs = nn.softmax(logits, axis=-1)
 
-        a = jrng.choice(rng2, jnp.arange(0, self.num_actions), p=prob)
-        logp = jnp.log(prob[a])
+        a = rlax.categorical_sample(rng2, probs)
 
-        return int(a), logp
+        return int(a), jnp.log(probs[a])
 
     def improve(self):
         """Performs n_train_steps training loops"""
 
-        self.rng, rng1, rng2 = jrng.split(self.rng, 3)
-
-        batch_size = self.config["batch_size"]
+        self.rng, rng1 = jrng.split(self.rng, 2)
 
         Transition = self.buffer.sample_all()
-        S, A, R, Done, S_next, Logp = Transition.to_tuple()
 
-        n_batch = len(R) // batch_size
-
-        gamma = self.config["gamma"]
-        Discount_R = compute_Discount_R(gamma, R, Done)
-        Adv = compute_Adv(self.params, rng1, self.critic_apply, S, Discount_R)
+        n_batch = self.config["T"] // self.config["batch_size"]
+        idx = jnp.arange(self.config["T"])
 
         n_train_steps = self.config["n_train_steps"]
         for _ in range(n_train_steps):
             for i in range(n_batch):
 
-                rng2, _rng2 = jrng.split(rng2, 2)
+                rng1, _rng1 = jrng.split(rng1, 2)
 
-                idx = np.array(range(i * batch_size, (i + 1) * batch_size))
-                _S = jax.tree_map(lambda x: x[idx], S)
-                _A = A[idx]
-                _Logp = Logp[idx]
-                _Adv = Adv[idx]
-                _Discount_R = Discount_R[idx]
-
-                epsilon = self.config["epsilon"]
+                _idx = idx[
+                    i * self.config["batch_size"] : (i + 1) * self.config["batch_size"]
+                ]
+                _Transition = jax.tree_map(
+                    lambda leaf: jax.tree_map(lambda x: x[_idx], leaf), Transition
+                )
                 loss, grads = jax.value_and_grad(ppo_loss)(
                     self.params,
-                    _rng2,
+                    _rng1,
                     self.actor_apply,
                     self.critic_apply,
-                    epsilon,
-                    _S,
-                    _A,
-                    _Logp,
-                    _Adv,
-                    _Discount_R,
+                    self._discount,
+                    self._epsilon,
+                    self._lambda,
+                    self._critic_coef,
+                    self._entropy_coef,
+                    _Transition,
                 )
                 self.params, self.opt_state = apply_updates(
                     self.optimizer, self.params, self.opt_state, grads
@@ -124,87 +135,42 @@ class PPO(Base):
         self.buffer.clear()
 
 
-@functools.partial(jax.jit, static_argnums=(0))
-def compute_Discount_R(gamma: float, R: Array, Done: Array) -> Array:
-    """Computes the non boostrapped value"""
-
-    def propagate_r(r_t1, rnd_t):
-        r_t = (
-            rnd_t[0] + gamma * rnd_t[1] * r_t1
-        )  # backpropagates reward if env not done
-        return r_t, r_t
-
-    nDone = jnp.where(Done, 0.0, 1.0)
-    RnD = jnp.flip(jnp.stack([R, nDone], axis=1), axis=0)
-    _, Discount_R = jax.lax.scan(f=propagate_r, init=R[-1], xs=RnD)
-    Discount_R = jnp.flip(Discount_R, axis=0)
-
-    return Discount_R
-
-
-@functools.partial(jax.jit, static_argnums=(2))
-def compute_Adv(
-    params: hk.Params, rng: PRNGKey, critic_apply: Callable, S: Array, Discount_R: Array
-) -> Array:
-    """Computes the advantage, td error"""
-
-    return Discount_R - critic_apply(params, rng, S)
-
-
-def actor_loss(
-    params: hk.Params,
-    rng: PRNGKey,
-    actor_apply: Callable,
-    epsilon: float,
-    S: Array,
-    A: Array,
-    Logp: Array,
-    Adv: Array,
-) -> Scalar:
-
-    new_Logit = actor_apply(params, rng, S, True)
-    new_Prob = jax.nn.softmax(new_Logit)
-    new_Prob_a = jnp.take_along_axis(new_Prob, A, axis=-1)
-    new_Logp = jnp.log(new_Prob_a)
-
-    Ratio = jnp.exp(new_Logp - Logp)
-
-    T1 = Ratio * Adv
-    T2 = jnp.clip(Ratio, 1 - epsilon, 1 + epsilon) * Adv
-
-    T = jnp.minimum(T1, T2)
-
-    return -jnp.mean(T)
-
-
-def critic_loss(
-    params: hk.Params, rng: PRNGKey, critic_apply: Callable, S: Array, Discount_R: Array
-) -> Scalar:
-
-    V = critic_apply(params, rng, S, True)
-    Loss = jnp.square(V - Discount_R)
-
-    return jnp.mean(Loss)
-
-
 @functools.partial(jax.jit, static_argnums=(2, 3))
 def ppo_loss(
     params: hk.Params,
     rng: PRNGKey,
     actor_apply: Callable,
     critic_apply: Callable,
-    epsilon: float,
-    S: Array,
-    A: Array,
-    Logp: Array,
-    Adv: Array,
-    Discount_R: Array,
+    discount: Scalar,
+    epsilon: Scalar,
+    lambda_: Scalar,
+    critic_coef: Scalar,
+    entropy_coef: Scalar,
+    Transition: TransitionBatch,
 ) -> Scalar:
+    """Computes the loss, PPO style"""
 
-    rng1, rng2 = jrng.split(rng, 2)
+    S, A, R, Done, S_next, Logp = Transition.to_tuple()
+    Discount = discount * jnp.where(Done, 0.0, 1.0)
 
-    a_loss = actor_loss(params, rng1, actor_apply, epsilon, S, A, Logp, Adv)
+    new_Logits = actor_apply(params, rng, S)  # (128, 2)
+    V = critic_apply(params, rng, S)[..., 0]  # (128, )
+    V_last = critic_apply(params, rng, S_next[-1:])[..., 0]
 
-    c_loss = critic_loss(params, rng2, critic_apply, S, Discount_R)
+    new_Probs = jnp.take_along_axis(
+        nn.softmax(new_Logits, axis=-1), A[..., jnp.newaxis], axis=-1
+    )[..., 0]
+    new_Logp = jnp.log(new_Probs + 1e-6)
 
-    return a_loss + c_loss
+    Ratio = jnp.exp(new_Logp - Logp)
+    Adv = rlax.truncated_generalized_advantage_estimation(
+        R, Discount, lambda_, jnp.concatenate([V, V_last], axis=0), True
+    )
+    actor_loss = rlax.clipped_surrogate_pg_loss(Ratio, Adv, epsilon)
+
+    TD_error = rlax.td_lambda(V, R, Discount, V, lambda_)
+    critic_loss = jnp.mean(jnp.square(TD_error))
+
+    entropy_loss = rlax.entropy_loss(new_Logits, jnp.ones_like(new_Probs))
+
+    return actor_loss + critic_coef * critic_loss + entropy_coef * entropy_loss
