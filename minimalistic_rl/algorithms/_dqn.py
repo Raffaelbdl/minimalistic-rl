@@ -10,7 +10,6 @@ import jax
 from jax import numpy as jnp, random as jrng
 import numpy as np
 import optax
-import rlax
 
 from minimalistic_rl.algorithms import Base
 from minimalistic_rl.updater import apply_updates
@@ -53,18 +52,24 @@ class DQN(Base):
 
         self.critic_apply = self.critic_transformed.apply
 
-        self._discount = self.config["discount"]
-        self._epsilon = self.config["epsilon"]
-
     def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, None]:
         """Performs an action in the environment"""
 
         rng1, rng2 = jrng.split(rng, 2)
 
-        S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
-        q = jax.jit(self.critic_apply)(self.params, rng1, S)[0]
+        epsilon = self.config["epsilon"]
+        params = self.params
 
-        a = rlax.epsilon_greedy(self._epsilon).sample(rng2, q)
+        S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
+        Q = jax.jit(self.critic_apply)(params, rng1, S)
+
+        a_greedy = jnp.argmax(Q, axis=-1)
+        a_random = jrng.choice(key=rng2, a=jnp.arange(Q.shape[-1]))
+
+        if jrng.uniform(rng2) > epsilon:
+            a = a_greedy
+        else:
+            a = a_random
 
         return int(a), None
 
@@ -76,24 +81,49 @@ class DQN(Base):
         batch_size = self.config["batch_size"]
 
         Transition = self.buffer.sample(batch_size=batch_size)
+        S, A, R, Done, S_next, _ = Transition.to_tuple()
 
-        n_batch = len(Transition.R) // batch_size
+        n_batch = len(R) // batch_size
+
+        gamma = self.config["gamma"]
+        Target = compute_Target(
+            self.params, rng1, self.critic_apply, gamma, R, Done, S_next
+        )
 
         n_train_steps = self.config["n_train_steps"]
         for _ in range(n_train_steps):
             for i in range(n_batch):
-
                 idx = np.array(range(i * batch_size, (i + 1) * batch_size))
-                _Transition = jax.tree_map(
-                    lambda leaf: jax.tree_map(lambda x: x[idx], leaf), Transition
-                )
+                _S = jax.tree_map(lambda x: x[idx], S)
+                _A = A[idx]
 
                 loss, grads = jax.value_and_grad(critic_loss)(
-                    self.params, rng1, self.critic_apply, self._discount, _Transition
+                    self.params, rng2, self.critic_apply, Target, _S, _A
                 )
                 self.params, self.opt_state = apply_updates(
                     self.optimizer, self.params, self.opt_state, grads
                 )
+
+
+@functools.partial(jax.jit, static_argnums=(2, 3))
+def compute_Target(
+    params: hk.Params,
+    rng: PRNGKey,
+    critic_apply: Callable,
+    gamma: float,
+    R: Array,
+    Done: Array,
+    S_next: Array,
+) -> Array:
+    """Computes the 1-step boostrapped value, DQN style"""
+
+    Q_next = critic_apply(params, rng, S_next)
+    nDone = jnp.where(Done, 0.0, 1.0)
+
+    Target = R
+    Target += gamma * nDone * jnp.max(Q_next, axis=-1)[..., None]
+
+    return Target
 
 
 @functools.partial(jax.jit, static_argnums=(2))
@@ -101,21 +131,15 @@ def critic_loss(
     params: hk.Params,
     rng: PRNGKey,
     critic_apply: Callable,
-    discount: float,
-    Transition,
+    Target: Array,
+    S: Array,
+    A: Array,
 ) -> Scalar:
     """Computes the critic loss, DQN style"""
 
-    S, A, R, Done, S_next, _ = Transition.to_tuple()
-
     Q = critic_apply(params, rng, S, True)
-    Q_next = critic_apply(params, rng, S_next, True)
-    Discount = discount * jnp.where(Done, 0.0, 1.0)
+    Q_a = jnp.take_along_axis(Q, A, axis=-1)
 
-    TD_error = jax.vmap(
-        lambda q_tm1, a_tm1, r_t, discount_t, q_t: rlax.q_learning(
-            q_tm1, a_tm1, r_t, discount_t, q_t, stop_target_gradients=True
-        )
-    )(Q, A, R, Discount, Q_next)
+    TD_error = jnp.square(Q_a - Target)
 
-    return jnp.mean(jnp.square(TD_error))
+    return jnp.mean(TD_error)
