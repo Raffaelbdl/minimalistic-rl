@@ -29,7 +29,7 @@ def from_singles(s, a, r, done, s_next, logp=Optional[None]) -> TransitionBatch:
     for k, x in zip(
         TransitionBatch.__annotations__.keys(), (s, a, r, done, s_next, logp)
     ):
-        cls_kwargs[k] = as_batch(x)
+        cls_kwargs[k] = x
     return TransitionBatch(**cls_kwargs)
 
 
@@ -57,17 +57,3 @@ class Buffer:
 
     def __len__(self):
         return len(self.storage)
-
-
-def as_batch(x: Numeric) -> ArrayNumpy:
-    def check_shape(y: Numeric):
-        if isinstance(y, (ArrayNumpy, Array)):
-            if len(y.shape) == 0:
-                return np.expand_dims(y, axis=0)
-            else:
-                return y
-        else:
-            return np.expand_dims(y, axis=0)
-
-    x = jax.tree_map(lambda y: check_shape(y), x)
-    return x
