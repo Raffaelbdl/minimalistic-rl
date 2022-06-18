@@ -1,20 +1,19 @@
 """Simple DQN implementation in JAX"""
 import functools
-import os
 from typing import Callable, Optional, Tuple
 
 import chex
 import gym
 import haiku as hk
 import jax
-from jax import numpy as jnp, random as jrng
-import numpy as np
+import jax.numpy as jnp
+import jax.random as jrng
 import optax
 import rlax
 
 from minimalistic_rl.algorithms import Base
+from minimalistic_rl.buffer import TransitionBatch
 from minimalistic_rl.updater import apply_updates
-from minimalistic_rl.algorithms.configs import DQN_CONFIG
 
 Array = chex.Array
 ArrayNumpy = chex.ArrayNumpy
@@ -22,11 +21,27 @@ PRNGKey = chex.PRNGKey
 Scalar = chex.Scalar
 
 
-class DQN(Base):
-    """Most basic DQN variant"""
+def make_DQN_config(user_config: dict):
+    user_config = user_config if user_config is not None else {}
+    config = {
+        "algo": user_config.pop("algo", "dqn"),
+        "policy": user_config.pop("policy", "off"),
+        "discount": user_config.pop("discount", 0.99),
+        "epsilon": user_config.pop("epsilon", 0.1),
+        "capacity": user_config.pop("capacity", int(1e6)),
+        "batch_size": user_config.pop("batch_size", 128),
+        "learning_rate": user_config.pop("learning_rate", 2.5e-4),
+        "improve_cycle": user_config.pop("improve_cycle", 1),
+        "n_train_steps": user_config.pop("n_train_steps", 1),
+        "n_steps": user_config.pop("n_steps", int(1e6)),
+        "episode_cycle_len": user_config.pop("episode_cycle_len", 10),
+        "verbose": user_config.pop("verbose", 2),
+    }
+    return config
 
-    policy = "off"
-    algo = "dqn"
+
+class DQN(Base):
+    """Simple DQN"""
 
     def __init__(
         self,
@@ -35,10 +50,9 @@ class DQN(Base):
         critic_transformed: hk.Transformed,
         config: Optional[dict] = None,
     ) -> None:
-        _config = DQN_CONFIG
-        if config is not None:
-            _config.update(config)
-        super().__init__(config=_config, rng=rng)
+        config = make_DQN_config(config)
+        super().__init__(config=config, rng=rng)
+
         self.rng, rng1 = jrng.split(self.rng, 2)
 
         dummy_s = env.reset()
@@ -71,29 +85,19 @@ class DQN(Base):
     def improve(self):
         """Performs n_train_steps training loops"""
 
-        self.rng, rng1, rng2 = jrng.split(self.rng, 3)
-
-        batch_size = self.config["batch_size"]
-
-        Transition = self.buffer.sample(batch_size=batch_size)
-
-        n_batch = len(Transition.R) // batch_size
+        self.rng, rng1 = jrng.split(self.rng, 2)
 
         n_train_steps = self.config["n_train_steps"]
         for _ in range(n_train_steps):
-            for i in range(n_batch):
 
-                idx = np.array(range(i * batch_size, (i + 1) * batch_size))
-                _Transition = jax.tree_map(
-                    lambda leaf: jax.tree_map(lambda x: x[idx], leaf), Transition
-                )
+            Transition = self.buffer.sample(self.config["batch_size"])
 
-                loss, grads = jax.value_and_grad(critic_loss)(
-                    self.params, rng1, self.critic_apply, self._discount, _Transition
-                )
-                self.params, self.opt_state = apply_updates(
-                    self.optimizer, self.params, self.opt_state, grads
-                )
+            loss, grads = jax.value_and_grad(critic_loss)(
+                self.params, rng1, self.critic_apply, self._discount, Transition
+            )
+            self.params, self.opt_state = apply_updates(
+                self.optimizer, self.params, self.opt_state, grads
+            )
 
 
 @functools.partial(jax.jit, static_argnums=(2))
@@ -101,8 +105,8 @@ def critic_loss(
     params: hk.Params,
     rng: PRNGKey,
     critic_apply: Callable,
-    discount: float,
-    Transition,
+    discount: Scalar,
+    Transition: TransitionBatch,
 ) -> Scalar:
     """Computes the critic loss, DQN style"""
 
