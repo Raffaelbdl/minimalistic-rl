@@ -1,7 +1,8 @@
 import haiku as hk
 import gym
 import jax
-from jax import numpy as jnp, random as jrng
+import jax.numpy as jnp
+import jax.random as jrng
 
 from minimalistic_rl import algorithms as algo
 from minimalistic_rl.trainer import train
