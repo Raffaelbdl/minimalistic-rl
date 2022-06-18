@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import chex
 import gym
-from jax import random as jrng
+import jax.random as jrng
 
 from minimalistic_rl import algorithms as algo
 from minimalistic_rl.buffer import from_singles
