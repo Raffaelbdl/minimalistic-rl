@@ -1,19 +1,19 @@
 """Simple DQN implementation in JAX"""
 import functools
-import os
 from typing import Callable, Optional, Tuple
 
 import chex
 import gym
 import haiku as hk
 import jax
-from jax import numpy as jnp, random as jrng
-import numpy as np
+import jax.numpy as jnp
+import jax.random as jrng
 import optax
+import rlax
 
 from minimalistic_rl.algorithms import Base
+from minimalistic_rl.buffer import TransitionBatch
 from minimalistic_rl.updater import apply_updates
-from minimalistic_rl.algorithms.configs import DQN_CONFIG
 
 Array = chex.Array
 ArrayNumpy = chex.ArrayNumpy
@@ -21,11 +21,27 @@ PRNGKey = chex.PRNGKey
 Scalar = chex.Scalar
 
 
-class DQN(Base):
-    """Most basic DQN variant"""
+def make_DQN_config(user_config: dict):
+    user_config = user_config if user_config is not None else {}
+    config = {
+        "algo": user_config.pop("algo", "dqn"),
+        "policy": user_config.pop("policy", "off"),
+        "discount": user_config.pop("discount", 0.99),
+        "epsilon": user_config.pop("epsilon", 0.1),
+        "capacity": user_config.pop("capacity", int(1e6)),
+        "batch_size": user_config.pop("batch_size", 128),
+        "learning_rate": user_config.pop("learning_rate", 2.5e-4),
+        "improve_cycle": user_config.pop("improve_cycle", 1),
+        "n_train_steps": user_config.pop("n_train_steps", 1),
+        "n_steps": user_config.pop("n_steps", int(1e6)),
+        "episode_cycle_len": user_config.pop("episode_cycle_len", 10),
+        "verbose": user_config.pop("verbose", 2),
+    }
+    return config
 
-    policy = "off"
-    algo = "dqn"
+
+class DQN(Base):
+    """Simple DQN"""
 
     def __init__(
         self,
@@ -34,10 +50,9 @@ class DQN(Base):
         critic_transformed: hk.Transformed,
         config: Optional[dict] = None,
     ) -> None:
-        _config = DQN_CONFIG
-        if config is not None:
-            _config.update(config)
-        super().__init__(config=_config, rng=rng)
+        config = make_DQN_config(config)
+        super().__init__(config=config, rng=rng)
+
         self.rng, rng1 = jrng.split(self.rng, 2)
 
         dummy_s = env.reset()
@@ -52,78 +67,37 @@ class DQN(Base):
 
         self.critic_apply = self.critic_transformed.apply
 
+        self._discount = self.config["discount"]
+        self._epsilon = self.config["epsilon"]
+
     def act(self, rng: PRNGKey, s: ArrayNumpy) -> Tuple[int, None]:
         """Performs an action in the environment"""
 
         rng1, rng2 = jrng.split(rng, 2)
 
-        epsilon = self.config["epsilon"]
-        params = self.params
-
         S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
-        Q = jax.jit(self.critic_apply)(params, rng1, S)
+        q = jax.jit(self.critic_apply)(self.params, rng1, S)[0]
 
-        a_greedy = jnp.argmax(Q, axis=-1)
-        a_random = jrng.choice(key=rng2, a=jnp.arange(Q.shape[-1]))
-
-        if jrng.uniform(rng2) > epsilon:
-            a = a_greedy
-        else:
-            a = a_random
+        a = rlax.epsilon_greedy(self._epsilon).sample(rng2, q)
 
         return int(a), None
 
     def improve(self):
         """Performs n_train_steps training loops"""
 
-        self.rng, rng1, rng2 = jrng.split(self.rng, 3)
-
-        batch_size = self.config["batch_size"]
-
-        Transition = self.buffer.sample(batch_size=batch_size)
-        S, A, R, Done, S_next, _ = Transition.to_tuple()
-
-        n_batch = len(R) // batch_size
-
-        gamma = self.config["gamma"]
-        Target = compute_Target(
-            self.params, rng1, self.critic_apply, gamma, R, Done, S_next
-        )
+        self.rng, rng1 = jrng.split(self.rng, 2)
 
         n_train_steps = self.config["n_train_steps"]
         for _ in range(n_train_steps):
-            for i in range(n_batch):
-                idx = np.array(range(i * batch_size, (i + 1) * batch_size))
-                _S = jax.tree_map(lambda x: x[idx], S)
-                _A = A[idx]
 
-                loss, grads = jax.value_and_grad(critic_loss)(
-                    self.params, rng2, self.critic_apply, Target, _S, _A
-                )
-                self.params, self.opt_state = apply_updates(
-                    self.optimizer, self.params, self.opt_state, grads
-                )
+            Transition = self.buffer.sample(self.config["batch_size"])
 
-
-@functools.partial(jax.jit, static_argnums=(2, 3))
-def compute_Target(
-    params: hk.Params,
-    rng: PRNGKey,
-    critic_apply: Callable,
-    gamma: float,
-    R: Array,
-    Done: Array,
-    S_next: Array,
-) -> Array:
-    """Computes the 1-step boostrapped value, DQN style"""
-
-    Q_next = critic_apply(params, rng, S_next)
-    nDone = jnp.where(Done, 0.0, 1.0)
-
-    Target = R
-    Target += gamma * nDone * jnp.max(Q_next, axis=-1)[..., None]
-
-    return Target
+            loss, grads = jax.value_and_grad(critic_loss)(
+                self.params, rng1, self.critic_apply, self._discount, Transition
+            )
+            self.params, self.opt_state = apply_updates(
+                self.optimizer, self.params, self.opt_state, grads
+            )
 
 
 @functools.partial(jax.jit, static_argnums=(2))
@@ -131,15 +105,21 @@ def critic_loss(
     params: hk.Params,
     rng: PRNGKey,
     critic_apply: Callable,
-    Target: Array,
-    S: Array,
-    A: Array,
+    discount: Scalar,
+    Transition: TransitionBatch,
 ) -> Scalar:
     """Computes the critic loss, DQN style"""
 
+    S, A, R, Done, S_next, _ = Transition.to_tuple()
+
     Q = critic_apply(params, rng, S, True)
-    Q_a = jnp.take_along_axis(Q, A, axis=-1)
+    Q_next = critic_apply(params, rng, S_next, True)
+    Discount = discount * jnp.where(Done, 0.0, 1.0)
 
-    TD_error = jnp.square(Q_a - Target)
+    TD_error = jax.vmap(
+        lambda q_tm1, a_tm1, r_t, discount_t, q_t: rlax.q_learning(
+            q_tm1, a_tm1, r_t, discount_t, q_t, stop_target_gradients=True
+        )
+    )(Q, A, R, Discount, Q_next)
 
-    return jnp.mean(TD_error)
+    return jnp.mean(jnp.square(TD_error))

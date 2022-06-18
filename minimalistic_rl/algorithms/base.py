@@ -2,7 +2,7 @@ from abc import abstractmethod
 from typing import Tuple, Union
 
 import chex
-from jax import random as jrng
+import jax.random as jrng
 
 from minimalistic_rl.buffer import Buffer
 
@@ -14,12 +14,11 @@ Scalar = chex.Scalar
 class Base:
     """Base class for RL algorithms"""
 
-    policy = "none"  # "off", "on"
-    algo = "none"
-
-    def __init__(self, config: dict, rng: PRNGKey, **kwargs) -> None:
+    def __init__(self, config: dict, rng: PRNGKey) -> None:
 
         self.config = config
+        self.policy = config["policy"]
+        self.algo = config["algo"]
 
         self.rng, rng1 = jrng.split(rng, 2)
 
