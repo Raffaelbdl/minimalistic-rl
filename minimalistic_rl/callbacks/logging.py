@@ -4,8 +4,8 @@ import logging
 from minimalistic_rl.callbacks.callback import Callback
 
 DEFAULT_FMT = "%(asctime)s | %(levelname)s | %(message)s"
-STEP_FMT = "%(asctime)s | STEP    | %(message)s"
-EPISODE_FMT = "%(asctime)s | EPISODE | %(message)s"
+STEP_FMT = "%(asctime)s | STEP    : %(message)s"
+EPISODE_FMT = "%(asctime)s | EPISODE : %(message)s"
 
 
 class Logger(Callback):
@@ -56,15 +56,13 @@ class Logger(Callback):
             self.rewards.append(ep_reward)
             if ep_count % self.rewards.maxlen == 0:
                 mean_reward = sum(self.rewards) / len(self.rewards)
-                self.logger.info(
-                    f"At episode {ep_count} > mean_reward is {mean_reward:.1f}"
-                )
+                self.logger.info(f"{ep_count} | mean_reward : {mean_reward:.1f}")
 
         elif self.verbose >= 2:
 
             ep_count = logs["ep_count"]
             ep_reward = logs["ep_reward"]
-            self.logger.info(f"At episode {ep_count} > reward is {ep_reward:.1f}")
+            self.logger.info(f"{ep_count} | reward : {ep_reward:.1f}")
 
         fmtter = logging.Formatter(DEFAULT_FMT)
         self.logger.handlers[0].setFormatter(fmtter)
@@ -78,7 +76,7 @@ class Logger(Callback):
 
             step_count = logs["step_count"]
             step_reward = logs["step_reward"]
-            self.logger.info(f"At step {step_count} > reward id {step_reward:.1f}")
+            self.logger.info(f"{step_count} | reward : {step_reward:.1f}")
 
         fmtter = logging.Formatter(DEFAULT_FMT)
         self.logger.handlers[0].setFormatter(fmtter)
