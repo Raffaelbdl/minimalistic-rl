@@ -15,7 +15,7 @@ import numpy as np
 import rlax
 
 from minimalistic_rl.algorithms import Base
-from minimalistic_rl.buffer import TransitionBatch
+from minimalistic_rl.buffer import TransitionBatch, from_singles
 from minimalistic_rl.updater import apply_updates
 from minimalistic_rl.wrapper import VecEnv
 
@@ -112,6 +112,7 @@ class PPO(Base):
             self._lambda,
             Transition,
         )
+        Transition = from_singles(S, A, R, Done, S_next, Logp, Adv, Return)
 
         idx = jnp.arange(len(S))
         n_batch = max(len(idx) // self.config["batch_size"], 1)
@@ -129,32 +130,17 @@ class PPO(Base):
                 _idx = idx[
                     i * self.config["batch_size"] : (i + 1) * self.config["batch_size"]
                 ]
-                _S = S[_idx]
-                _A = A[_idx]
-                _R = R[_idx]
-                _Done = Done[idx]
-                _S_next = S_next[_idx]
-                _Logp = Logp[_idx]
-                _Adv = Adv[_idx]
-                _Return = Return[_idx]
+                _Transition = jax.tree_map(lambda leaf: leaf[_idx], Transition)
+
                 loss, grads = jax.value_and_grad(ppo_loss, has_aux=False)(
                     self.params,
                     _rng1,
                     self.actor_apply,
                     self.critic_apply,
-                    self._discount,
                     self._epsilon,
-                    self._lambda,
                     self._critic_coef,
                     self._entropy_coef,
-                    _S,
-                    _A,
-                    _R,
-                    _Done,
-                    _S_next,
-                    _Logp,
-                    _Adv,
-                    _Return,
+                    _Transition,
                 )
                 self.params, self.opt_state = apply_updates(
                     self.optimizer, self.params, self.opt_state, grads
@@ -178,24 +164,16 @@ def ppo_loss(
     rng: PRNGKey,
     actor_apply: Callable,
     critic_apply: Callable,
-    discount: Scalar,
     epsilon: Scalar,
-    lambda_: Scalar,
     critic_coef: Scalar,
     entropy_coef: Scalar,
-    S,
-    A,
-    R,
-    Done,
-    S_next,
-    Logp,
-    Adv,
-    Return,
+    Transition: TransitionBatch,
 ) -> Scalar:
     """Computes the loss, PPO style"""
+    S, A, _, _, _, Logp, Adv, Return = Transition.to_tuple()
 
-    new_Logits = actor_apply(params, rng, S)  # (128, 2)
-    V = critic_apply(params, rng, S)[..., 0]  # (128, )
+    new_Logits = actor_apply(params, rng, S)
+    V = critic_apply(params, rng, S)[..., 0]
 
     new_Probs = jnp.take_along_axis(
         nn.softmax(new_Logits, axis=-1), A[..., jnp.newaxis], axis=-1
@@ -223,8 +201,8 @@ def prepare_data(
     Transition: TransitionBatch,
 ):
 
-    S, A, R, Done, S_next, Logp = Transition.to_tuple()  # [B, N, shape]
-    S = jnp.swapaxes(S, 1, 0)  # [N, B, shape]
+    S, A, R, Done, S_next, Logp, _, _ = Transition.to_tuple()
+    S = jnp.swapaxes(S, 1, 0)
     A = jnp.swapaxes(A, 1, 0)
     R = jnp.swapaxes(R, 1, 0)
     Done = jnp.swapaxes(Done, 1, 0)

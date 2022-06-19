@@ -19,15 +19,21 @@ class TransitionBatch:
     R: Array
     Done: Array
     S_next: Array
-    Logp: Array = field(default=0)
+    Logp: Array = field(default=0.0)
+    Adv: Array = field(default=0.0)
+    Return: Array = field(default=0.0)
 
 
-def from_singles(s, a, r, done, s_next, logp=Optional[None]) -> TransitionBatch:
+def from_singles(
+    s, a, r, done, s_next, logp=None, adv=None, ret=None
+) -> TransitionBatch:
     logp = logp if logp is not None else np.zeros_like(r)
+    adv = adv if adv is not None else np.zeros_like(r)
+    ret = ret if ret is not None else np.zeros_like(r)
 
     cls_kwargs = {}
     for k, x in zip(
-        TransitionBatch.__annotations__.keys(), (s, a, r, done, s_next, logp)
+        TransitionBatch.__annotations__.keys(), (s, a, r, done, s_next, logp, adv, ret)
     ):
         cls_kwargs[k] = x
     return TransitionBatch(**cls_kwargs)
