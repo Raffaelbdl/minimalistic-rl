@@ -2,9 +2,11 @@ from abc import abstractmethod
 from typing import Tuple, Union
 
 import chex
+import gym
 import jax.random as jrng
 
 from minimalistic_rl.buffer import Buffer
+from minimalistic_rl.wrapper import VecEnv
 
 ArrayNumpy = chex.ArrayNumpy
 PRNGKey = chex.PRNGKey
@@ -14,7 +16,7 @@ Scalar = chex.Scalar
 class Base:
     """Base class for RL algorithms"""
 
-    def __init__(self, config: dict, rng: PRNGKey) -> None:
+    def __init__(self, config: dict, rng: PRNGKey, env: Union[gym.Env, VecEnv]) -> None:
 
         self.config = config
         self.policy = config["policy"]
@@ -24,6 +26,11 @@ class Base:
 
         capacity = config["T"] if self.policy == "on" else config["capacity"]
         self.buffer = Buffer(capacity, seed=int(rng1[0]))
+
+        if not isinstance(env, VecEnv):
+            self.env = VecEnv(env, 1)
+        else:
+            self.env = env
 
     @abstractmethod
     def act(
