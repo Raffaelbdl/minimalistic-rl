@@ -74,7 +74,9 @@ def train(
         if improve_condition(step=step, agent=agent):
             logs = agent.improve(logs)
 
-        s = np.zeros((env.num_envs,) + env.observation_space.shape)
+        s = np.zeros(
+            (env.num_envs,) + env.observation_space.shape, dtype=env.observation_type
+        )
         for i, d in enumerate(done):
             if d:
                 logs["ep_count"] += 1
@@ -114,6 +116,7 @@ def init_logs(agent: algo.Base, num_envs) -> dict:
         "policy": agent.policy,
         "ep_count": 0,
         "ep_reward": [0.0 for _ in range(num_envs)],
+        "num_envs": num_envs,
         "total_loss": 0.0,
     }
     if agent.algo == "ppo":
