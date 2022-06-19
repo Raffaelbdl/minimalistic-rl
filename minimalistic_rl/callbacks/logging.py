@@ -29,6 +29,7 @@ class Logger(Callback):
         self.logger = init_logger("minimalistic-rl/logger", DEFAULT_FMT, logging.INFO)
         self.verbose = config["verbose"]
 
+        self.num_envs = None
         if self.verbose == 0:
             self.step_bar = tqdm.tqdm(
                 desc="Training ... ", total=(config["n_steps"] + 1)
@@ -59,7 +60,7 @@ class Logger(Callback):
 
         fmtter = logging.Formatter(EPISODE_FMT)
         self.logger.handlers[0].setFormatter(fmtter)
-        last_ended = logs.pop("last_ended", 0)
+        last_ended = logs["last_ended"] if "last_ended" in logs.keys() else 0
         ep_count = (
             logs["ep_count"][last_ended]
             if isinstance(logs["ep_count"], (list, np.ndarray))
@@ -100,7 +101,9 @@ class Logger(Callback):
         self.logger.handlers[0].setFormatter(fmtter)
 
         if self.verbose == 0:
-            self.step_bar.update(logs.pop("num_envs", 1))
+            if self.num_envs is None:
+                self.num_envs = logs["num_envs"] if "num_envs" in logs else 1
+            self.step_bar.update(self.num_envs)
 
         if self.verbose == 3:
 
