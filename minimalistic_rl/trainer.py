@@ -1,14 +1,17 @@
 """Simple training loop"""
 import functools
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import chex
 import gym
 import jax.random as jrng
+import numpy as np
+from tqdm import tqdm
 
 from minimalistic_rl import algorithms as algo
 from minimalistic_rl.buffer import from_singles
 from minimalistic_rl.callbacks import Callback, Logger
+from minimalistic_rl.wrapper import VecEnv
 
 
 Array = chex.Array
@@ -20,13 +23,19 @@ Scalar = chex.Scalar
 def train(
     rng: PRNGKey,
     agent: algo.Base,
-    env: gym.Env,
+    env: Union[gym.Env, VecEnv],
     callbacks: Optional[List[Callback]] = None,
     render: bool = False,
 ):
+    if not isinstance(env, VecEnv):
+        env = VecEnv(env, 1)
     config = agent.config
-    logs = init_logs(agent)
+    logs = init_logs(agent, env.num_envs)
+    config["num_envs"] = env.num_envs
     callbacks = init_callbacks(config, callbacks)
+
+    if not isinstance(env, VecEnv):
+        env = VecEnv(env, 1)
 
     for c in callbacks:
         c.at_train_start(logs)
@@ -44,9 +53,10 @@ def train(
         )
 
     s = env.reset(seed=int(rng[0]))
-    for step in range(1, n_steps + 1):
+    logs["max_steps"] = (n_steps + 1) // env.num_envs
+    for step in range(1, (n_steps + 1) // env.num_envs):
         if render:
-            env.render()
+            env[0].render()
 
         logs["step_count"] = step
         for c in callbacks:
@@ -64,23 +74,28 @@ def train(
         if improve_condition(step=step, agent=agent):
             logs = agent.improve(logs)
 
-        if done:
-            logs["ep_count"] += 1
+        s = np.zeros((env.num_envs,) + env.observation_space.shape)
+        for i, d in enumerate(done):
+            if d:
+                logs["ep_count"] += 1
+                logs["last_ended"] = i
+                for c in callbacks:
+                    c.at_episode_end(logs)
 
-            for c in callbacks:
-                c.at_episode_end(logs)
-
-            s = env.reset(seed=int(rng[0]))
-            logs["ep_reward"] = 0.0
-        else:
-            logs["ep_reward"] += r
-            s = s_next
+                rng = jrng.split(rng)[0]
+                s[i] = env[i].reset(seed=int(rng[0]))
+                logs["ep_reward"][i] = 0.0
+            else:
+                logs["ep_reward"][i] += r[i]
+                s[i] = s_next[i]
 
         for c in callbacks:
             c.at_step_end(logs)
 
     for c in callbacks:
         c.at_train_end(logs)
+
+    return logs
 
 
 def off_policy_improve_condition(
@@ -93,12 +108,12 @@ def on_policy_improve_condition(step: int, agent: algo.Base, T: int) -> bool:
     return len(agent.buffer) >= T
 
 
-def init_logs(agent: algo.Base) -> dict:
+def init_logs(agent: algo.Base, num_envs) -> dict:
     logs = {
         "algo": agent.algo,
         "policy": agent.policy,
         "ep_count": 0,
-        "ep_reward": 0.0,
+        "ep_reward": [0.0 for _ in range(num_envs)],
         "total_loss": 0.0,
     }
     if agent.algo == "ppo":
