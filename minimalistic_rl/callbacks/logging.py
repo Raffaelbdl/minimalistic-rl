@@ -2,6 +2,7 @@ from collections import deque
 import logging
 
 import numpy as np
+import tqdm
 
 from minimalistic_rl.callbacks.callback import Callback
 
@@ -28,6 +29,11 @@ class Logger(Callback):
         self.logger = init_logger("minimalistic-rl/logger", DEFAULT_FMT, logging.INFO)
         self.verbose = config["verbose"]
 
+        if self.verbose == 0:
+            self.step_bar = tqdm.tqdm(
+                desc="Training ... ", total=(config["n_steps"] + 1)
+            )
+
         if self.verbose == 1:
             self.rewards = deque(maxlen=config["episode_cycle_len"])
 
@@ -53,18 +59,19 @@ class Logger(Callback):
 
         fmtter = logging.Formatter(EPISODE_FMT)
         self.logger.handlers[0].setFormatter(fmtter)
+        last_ended = logs.pop("last_ended", 0)
         ep_count = (
-            logs["ep_count"][0]
+            logs["ep_count"][last_ended]
             if isinstance(logs["ep_count"], (list, np.ndarray))
             else logs["ep_count"]
         )
         ep_reward = (
-            logs["ep_reward"][0]
+            logs["ep_reward"][last_ended]
             if isinstance(logs["ep_reward"], (list, np.ndarray))
             else logs["ep_reward"]
         )
         total_loss = (
-            logs["total_loss"][0]
+            logs["total_loss"][last_ended]
             if isinstance(logs["total_loss"], (list, np.ndarray))
             else logs["total_loss"]
         )
@@ -78,7 +85,7 @@ class Logger(Callback):
                 msg += f" loss : {total_loss:.2f} |"
                 self.logger.info(msg)
 
-        elif self.verbose >= 2:
+        elif self.verbose == 2:
             msg = f"{ep_count} |"
             msg += f" reward : {ep_reward:.1f} |"
             msg += f" loss : {total_loss:.2f} |"
@@ -91,6 +98,9 @@ class Logger(Callback):
 
         fmtter = logging.Formatter(STEP_FMT)
         self.logger.handlers[0].setFormatter(fmtter)
+
+        if self.verbose == 0:
+            self.step_bar.update(logs.pop("num_envs", 1))
 
         if self.verbose == 3:
 
