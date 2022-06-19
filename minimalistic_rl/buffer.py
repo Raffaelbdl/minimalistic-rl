@@ -23,7 +23,7 @@ class TransitionBatch:
 
 
 def from_singles(s, a, r, done, s_next, logp=Optional[None]) -> TransitionBatch:
-    logp = logp if logp else 0
+    logp = logp if logp is not None else np.zeros_like(r)
 
     cls_kwargs = {}
     for k, x in zip(
