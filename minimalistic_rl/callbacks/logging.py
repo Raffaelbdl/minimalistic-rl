@@ -1,6 +1,8 @@
 from collections import deque
 import logging
 
+import numpy as np
+
 from minimalistic_rl.callbacks.callback import Callback
 
 DEFAULT_FMT = "%(asctime)s | %(levelname)s | %(message)s"
@@ -16,6 +18,9 @@ class Logger(Callback):
     - 1 : logs at each episode cycle
     - 2 : logs at each episode
     - 3 : logs at each step
+
+    When working with vectorized envs, only the first one will
+    be used for logging.
     """
 
     def __init__(self, config: dict):
@@ -48,9 +53,21 @@ class Logger(Callback):
 
         fmtter = logging.Formatter(EPISODE_FMT)
         self.logger.handlers[0].setFormatter(fmtter)
-        ep_count = logs["ep_count"]
-        ep_reward = logs["ep_reward"]
-        total_loss = logs["total_loss"]
+        ep_count = (
+            logs["ep_count"][0]
+            if isinstance(logs["ep_count"], (list, np.ndarray))
+            else logs["ep_count"]
+        )
+        ep_reward = (
+            logs["ep_reward"][0]
+            if isinstance(logs["ep_reward"], (list, np.ndarray))
+            else logs["ep_reward"]
+        )
+        total_loss = (
+            logs["total_loss"][0]
+            if isinstance(logs["total_loss"], (list, np.ndarray))
+            else logs["total_loss"]
+        )
 
         if self.verbose == 1:
             self.rewards.append(ep_reward)
@@ -77,8 +94,16 @@ class Logger(Callback):
 
         if self.verbose == 3:
 
-            step_count = logs["step_count"]
-            step_reward = logs["step_reward"]
+            step_count = (
+                logs["step_count"][0]
+                if isinstance(logs["step_count"], (list, np.ndarray))
+                else logs["step_count"]
+            )
+            step_reward = (
+                logs["step_reward"][0]
+                if isinstance(logs["step_reward"], (list, np.ndarray))
+                else logs["step_reward"]
+            )
             self.logger.info(f"{step_count} | reward : {step_reward:.1f}")
 
         fmtter = logging.Formatter(DEFAULT_FMT)
