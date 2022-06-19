@@ -36,7 +36,7 @@ class VecEnv(gym.Env):
 
     @property
     def observation_type(self):
-        dummy_observation = self.envs[0].observation_space.sample()
+        dummy_observation = self.envs[0].reset()
         if isinstance(dummy_observation, np.ndarray):
             return dummy_observation.dtype
         else:
