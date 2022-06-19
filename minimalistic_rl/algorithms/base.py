@@ -35,6 +35,6 @@ class Base:
         raise NotImplementedError("Act method must be implemented")
 
     @abstractmethod
-    def improve(self) -> None:
+    def improve(self, logs) -> None:
         """Performs a single training step"""
         raise NotImplementedError("Improve method must be implemented")

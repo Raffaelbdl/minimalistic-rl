@@ -1,4 +1,5 @@
 """Simple PPo implementation in JAX"""
+from collections import deque
 import functools
 from typing import Callable, Optional, Tuple
 
@@ -10,6 +11,7 @@ import jax.nn as nn
 import jax.numpy as jnp
 import jax.random as jrng
 import optax
+import numpy as np
 import rlax
 
 from minimalistic_rl.algorithms import Base
@@ -94,7 +96,7 @@ class PPO(Base):
 
         return int(a), jnp.log(probs[a])
 
-    def improve(self):
+    def improve(self, logs: dict):
         """Performs n_train_steps training loops"""
 
         self.rng, rng1 = jrng.split(self.rng, 2)
@@ -105,6 +107,10 @@ class PPO(Base):
         idx = jnp.arange(self.config["T"])
 
         n_train_steps = self.config["n_train_steps"]
+        mean_loss = deque()
+        mean_actor_loss = deque()
+        mean_critic_loss = deque()
+        mean_entropy = deque()
         for _ in range(n_train_steps):
             for i in range(n_batch):
 
@@ -116,7 +122,9 @@ class PPO(Base):
                 _Transition = jax.tree_map(
                     lambda leaf: jax.tree_map(lambda x: x[_idx], leaf), Transition
                 )
-                loss, grads = jax.value_and_grad(ppo_loss)(
+                (loss, (actor_loss, critic_loss, entropy)), grads = jax.value_and_grad(
+                    ppo_loss, has_aux=True
+                )(
                     self.params,
                     _rng1,
                     self.actor_apply,
@@ -131,8 +139,23 @@ class PPO(Base):
                 self.params, self.opt_state = apply_updates(
                     self.optimizer, self.params, self.opt_state, grads
                 )
+                mean_loss.append(np.array(loss))
+                mean_actor_loss.append(np.array(actor_loss))
+                mean_critic_loss.append(np.array(critic_loss))
+                mean_entropy.append(np.array(entropy))
+
+        logs.update(
+            {
+                "total_loss": sum(mean_loss) / len(mean_loss),
+                "actor_loss": sum(mean_actor_loss) / len(mean_actor_loss),
+                "critic_loss": sum(mean_critic_loss) / len(mean_critic_loss),
+                "entropy": sum(mean_entropy) / len(mean_entropy),
+            }
+        )
 
         self.buffer.clear()
+
+        return logs
 
 
 @functools.partial(jax.jit, static_argnums=(2, 3))
@@ -173,4 +196,11 @@ def ppo_loss(
 
     entropy_loss = rlax.entropy_loss(new_Logits, jnp.ones_like(new_Probs))
 
-    return actor_loss + critic_coef * critic_loss + entropy_coef * entropy_loss
+    return (
+        actor_loss + critic_coef * critic_loss + entropy_coef * entropy_loss,
+        (
+            actor_loss,
+            critic_loss,
+            -entropy_loss,
+        ),
+    )

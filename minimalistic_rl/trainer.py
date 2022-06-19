@@ -43,8 +43,6 @@ def train(
             on_policy_improve_condition, T=config["T"]
         )
 
-    logs["ep_count"] = 0
-    logs["ep_reward"] = 0.0
     s = env.reset(seed=int(rng[0]))
     for step in range(1, n_steps + 1):
         if render:
@@ -64,7 +62,7 @@ def train(
         agent.buffer.add(transition=transition)
 
         if improve_condition(step=step, agent=agent):
-            agent.improve()
+            logs = agent.improve(logs)
 
         if done:
             logs["ep_count"] += 1
@@ -96,7 +94,21 @@ def on_policy_improve_condition(step: int, agent: algo.Base, T: int) -> bool:
 
 
 def init_logs(agent: algo.Base) -> dict:
-    logs = {"algo": agent.algo, "policy": agent.policy}
+    logs = {
+        "algo": agent.algo,
+        "policy": agent.policy,
+        "ep_count": 0,
+        "ep_reward": 0.0,
+        "total_loss": 0.0,
+    }
+    if agent.algo == "ppo":
+        logs.update(
+            {
+                "actor_loss": 0.0,
+                "critic_loss": 0.0,
+                "entropy": 0.0,
+            }
+        )
     logs.update(agent.config)
 
     return logs
