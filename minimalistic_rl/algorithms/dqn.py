@@ -1,4 +1,5 @@
 """Simple DQN implementation in JAX"""
+from collections import deque
 import functools
 from typing import Callable, Optional, Tuple
 
@@ -82,12 +83,13 @@ class DQN(Base):
 
         return int(a), None
 
-    def improve(self):
+    def improve(self, logs: dict):
         """Performs n_train_steps training loops"""
 
         self.rng, rng1 = jrng.split(self.rng, 2)
 
         n_train_steps = self.config["n_train_steps"]
+        mean_loss = deque()
         for _ in range(n_train_steps):
 
             Transition = self.buffer.sample(self.config["batch_size"])
@@ -98,6 +100,11 @@ class DQN(Base):
             self.params, self.opt_state = apply_updates(
                 self.optimizer, self.params, self.opt_state, grads
             )
+            mean_loss.append(loss)
+
+        logs["total_loss"] = sum(mean_loss) / len(mean_loss)
+
+        return logs
 
 
 @functools.partial(jax.jit, static_argnums=(2))
