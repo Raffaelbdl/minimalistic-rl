@@ -1,12 +1,13 @@
+from copy import deepcopy
+
 import gym
 import numpy as np
 
 
 class VecEnv(gym.Env):
-    def __init__(self, env_id, num_envs) -> None:
-        self.env_id = env_id
+    def __init__(self, env, num_envs) -> None:
         self.num_envs = num_envs
-        self.envs = [gym.make(env_id) for _ in range(num_envs)]
+        self.envs = [deepcopy(env) for _ in range(num_envs)]
 
     def reset(self, seed=None):
         return np.array([env.reset() for env in self.envs])
