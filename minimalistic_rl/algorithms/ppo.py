@@ -150,6 +150,7 @@ class PPO(Base):
                 "actor_loss": sum(mean_actor_loss) / len(mean_actor_loss),
                 "critic_loss": sum(mean_critic_loss) / len(mean_critic_loss),
                 "entropy": sum(mean_entropy) / len(mean_entropy),
+                "params": self.params,
             }
         )
 
