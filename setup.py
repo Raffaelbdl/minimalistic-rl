@@ -12,8 +12,8 @@ setup(
     # Needed to actually package something
     packages=find_namespace_packages(),
     # Needed for dependencies
-    install_requires=requirements[1:],
-    dependency_links=requirements[:1],
+    install_requires=requirements[:1],
+    dependency_links=requirements[1:],
     # package_data={"configs": ["*.yaml"]},
     # *strongly* suggested for sharing
     version="0.0.1",
