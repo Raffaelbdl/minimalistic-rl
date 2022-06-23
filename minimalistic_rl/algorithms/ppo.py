@@ -111,6 +111,7 @@ class PPO(Base):
             self._discount,
             self._lambda,
             Transition,
+            True,
         )
         Transition = from_singles(S, A, R, Done, S_next, Logp, Adv, Return)
 
@@ -192,7 +193,7 @@ def ppo_loss(
     return actor_loss + critic_coef * critic_loss + entropy_coef * entropy_loss
 
 
-@functools.partial(jax.jit, static_argnums=(2))
+@functools.partial(jax.jit, static_argnums=(2, 6))
 def prepare_data(
     params: hk.Params,
     rng: PRNGKey,
@@ -200,6 +201,7 @@ def prepare_data(
     discount: float,
     lambda_: float,
     Transition: TransitionBatch,
+    normalize: bool = False,
 ):
 
     S, A, R, Done, S_next, Logp, _, _ = Transition.to_tuple()
@@ -212,7 +214,7 @@ def prepare_data(
     Discount = discount * jnp.where(Done, 0.0, 1.0)
 
     V_ = jax.vmap(lambda s: critic_apply(params, rng, s))(S)[..., 0]
-    V_last_ = jax.vmap(lambda s: critic_apply(params, rng, s))(S[:, -1:])[..., 0]
+    V_last_ = jax.vmap(lambda s: critic_apply(params, rng, s))(S_next[:, -1:])[..., 0]
 
     def get_gae(V, V_last, R, Discount):
         Adv = rlax.truncated_generalized_advantage_estimation(
@@ -221,6 +223,8 @@ def prepare_data(
         return Adv
 
     Adv = jax.vmap(get_gae)(V_, V_last_, R, Discount)
+    if normalize:
+        Adv = (Adv - jnp.mean(Adv)) / (jnp.std(Adv) + 1e-8)
 
     def get_return(V, R, Discount):
         Lambda_return = rlax.lambda_returns(R, Discount, V, lambda_, True)
