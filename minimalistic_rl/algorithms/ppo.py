@@ -71,7 +71,19 @@ class PPO(Base):
         self.params = hk.data_structures.merge(self.actor_params, self.critic_params)
 
         learning_rate = self.config["learning_rate"]
-        self.optimizer = optax.adam(learning_rate)
+        num_updates = (
+            self.config["n_steps"]
+            // self.config["batch_size"]
+            * self.config["n_train_steps"]
+        )
+        learning_rate_schedule = optax.linear_schedule(
+            learning_rate, 0.0, num_updates, 0
+        )
+        self.optimizer = optax.chain(
+            optax.clip_by_global_norm(0.5),
+            optax.adam(learning_rate_schedule),
+        )
+
         self.opt_state = self.optimizer.init(self.params)
 
         self.actor_apply = actor_transformed.apply
@@ -111,7 +123,6 @@ class PPO(Base):
             self._discount,
             self._lambda,
             Transition,
-            True,
         )
         Transition = from_singles(S, A, R, Done, S_next, Logp, Adv, Return)
 
@@ -120,6 +131,10 @@ class PPO(Base):
 
         n_train_steps = self.config["n_train_steps"]
         mean_loss = deque()
+        mean_actor_loss = deque()
+        mean_critic_loss = deque()
+        mean_entropy = deque()
+        mean_approx_kl = deque()
         for _ in range(n_train_steps):
             rng1 = jrng.split(rng1)[0]
             idx = jrng.permutation(rng1, idx, independent=True)
@@ -133,7 +148,15 @@ class PPO(Base):
                 ]
                 _Transition = jax.tree_map(lambda leaf: leaf[_idx], Transition)
 
-                loss, grads = jax.value_and_grad(ppo_loss, has_aux=False)(
+                (
+                    loss,
+                    (
+                        actor_loss,
+                        critic_loss,
+                        entropy,
+                        approx_kl,
+                    ),
+                ), grads = jax.value_and_grad(ppo_loss, has_aux=True)(
                     self.params,
                     _rng1,
                     self.actor_apply,
@@ -147,11 +170,19 @@ class PPO(Base):
                     self.optimizer, self.params, self.opt_state, grads
                 )
                 mean_loss.append(np.array(loss))
+                mean_actor_loss.append(np.array(actor_loss))
+                mean_critic_loss.append(np.array(critic_loss))
+                mean_entropy.append(np.array(entropy))
+                mean_approx_kl.append(np.array(approx_kl))
 
         logs.update(
             {
                 "total_loss": sum(mean_loss) / len(mean_loss),
                 "params": self.params,
+                "actor_loss": sum(mean_actor_loss) / len(mean_actor_loss),
+                "critic_loss": sum(mean_critic_loss) / len(mean_critic_loss),
+                "entropy": sum(mean_entropy) / len(mean_entropy),
+                "approx_kl": sum(mean_approx_kl) / len(mean_approx_kl),
             }
         )
 
@@ -160,7 +191,7 @@ class PPO(Base):
         return logs
 
 
-@functools.partial(jax.jit, static_argnums=(2, 3))
+@functools.partial(jax.jit, static_argnums=(2, 3, 8))
 def ppo_loss(
     params: hk.Params,
     rng: PRNGKey,
@@ -170,9 +201,13 @@ def ppo_loss(
     critic_coef: Scalar,
     entropy_coef: Scalar,
     Transition: TransitionBatch,
+    normalize: bool = True,
 ) -> Scalar:
     """Computes the loss, PPO style"""
     S, A, _, _, _, Logp, Adv, Return = Transition.to_tuple()
+
+    if normalize:
+        Adv = (Adv - jnp.mean(Adv)) / (jnp.std(Adv) + 1e-8)
 
     new_Logits = actor_apply(params, rng, S)
     V = critic_apply(params, rng, S)[..., 0]
@@ -182,7 +217,10 @@ def ppo_loss(
     )[..., 0]
     new_Logp = jnp.log(new_Probs + 1e-6)
 
-    Ratio = jnp.exp(new_Logp - Logp)
+    logRatio = new_Logp - Logp
+    Ratio = jnp.exp(logRatio)
+
+    approx_kl = jax.lax.stop_gradient(jnp.mean((Ratio - 1) - logRatio))
 
     actor_loss = rlax.clipped_surrogate_pg_loss(Ratio, Adv, epsilon)
 
@@ -190,10 +228,15 @@ def ppo_loss(
 
     entropy_loss = rlax.entropy_loss(new_Logits, jnp.ones_like(new_Probs))
 
-    return actor_loss + critic_coef * critic_loss + entropy_coef * entropy_loss
+    return actor_loss + critic_coef * critic_loss + entropy_coef * entropy_loss, (
+        actor_loss,
+        critic_loss,
+        -entropy_loss,
+        approx_kl,
+    )
 
 
-@functools.partial(jax.jit, static_argnums=(2, 6))
+@functools.partial(jax.jit, static_argnums=(2))
 def prepare_data(
     params: hk.Params,
     rng: PRNGKey,
@@ -201,7 +244,6 @@ def prepare_data(
     discount: float,
     lambda_: float,
     Transition: TransitionBatch,
-    normalize: bool = False,
 ):
 
     S, A, R, Done, S_next, Logp, _, _ = Transition.to_tuple()
@@ -223,8 +265,6 @@ def prepare_data(
         return Adv
 
     Adv = jax.vmap(get_gae)(V_, V_last_, R, Discount)
-    if normalize:
-        Adv = (Adv - jnp.mean(Adv)) / (jnp.std(Adv) + 1e-8)
 
     def get_return(V, R, Discount):
         Lambda_return = rlax.lambda_returns(R, Discount, V, lambda_, True)
