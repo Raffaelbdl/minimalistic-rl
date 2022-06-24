@@ -27,7 +27,9 @@ def train(
     callbacks: Optional[List[Callback]] = None,
     render: bool = False,
 ):
-    if not isinstance(env, VecEnv):
+    try:
+        num_envs = env.num_envs
+    except:
         env = VecEnv(env, 1)
     config = agent.config
     logs = init_logs(agent, env.num_envs)
@@ -55,6 +57,7 @@ def train(
     s = env.reset(seed=int(rng[0]))
     logs["max_steps"] = (n_steps + 1) // env.num_envs
     for step in range(1, (n_steps + 1) // env.num_envs):
+
         if render:
             env[0].render()
 
@@ -63,7 +66,6 @@ def train(
             c.at_step_start(logs)
 
         rng, rng1 = jrng.split(rng, 2)
-
         a, logp = agent.act(rng=rng1, s=s)
         s_next, r, done, _ = env.step(action=a)
         logs["step_reward"] = r
@@ -81,6 +83,7 @@ def train(
             if d:
                 logs["ep_count"] += 1
                 logs["last_ended"] = i
+                logs["last_ep_reward"] = logs["ep_reward"][i]
                 for c in callbacks:
                     c.at_episode_end(logs)
 
@@ -118,14 +121,11 @@ def init_logs(agent: algo.Base, num_envs) -> dict:
         "ep_reward": [0.0 for _ in range(num_envs)],
         "num_envs": num_envs,
         "total_loss": 0.0,
+        "last_ep_reward": 0.0,
     }
     if agent.algo == "ppo":
         logs.update(
-            {
-                "actor_loss": 0.0,
-                "critic_loss": 0.0,
-                "entropy": 0.0,
-            }
+            {"actor_loss": 0.0, "critic_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0}
         )
     logs.update(agent.config)
 
@@ -139,3 +139,4 @@ def init_callbacks(
     callbacks.append(Logger(config))
 
     return callbacks
+
