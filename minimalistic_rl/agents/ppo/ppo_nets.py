@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Iterable, Tuple
 
 import haiku as hk
 import jax
@@ -9,7 +9,7 @@ from minimalistic_rl.wrapper import VecEnv
 
 
 def make_mlp_nets(
-    environment: VecEnv, hidden_layers: Tuple[int] = (64, 64)
+    environment: VecEnv, hidden_layers: Tuple[int, ...] = (64, 64)
 ) -> Tuple[hk.Transformed, hk.Transformed]:
     """Make a simple MLP module with PPO weights and biases initialization"""
 
@@ -24,6 +24,7 @@ def make_mlp_nets(
                     name=f"linear_{i}",
                 )(x)
                 x = jax.nn.relu(x)
+
             return x
 
     @hk.transform
@@ -55,13 +56,17 @@ def make_mlp_nets(
     return actor_fn, critic_fn
 
 
-def make_atari_nets(environment: VecEnv) -> Tuple[hk.Transformed, hk.Transformed]:
+def make_atari_nets(
+    environment: VecEnv, hidden_layers: Tuple[int, ...] = (512), swapaxes: bool = True
+) -> Tuple[hk.Transformed, hk.Transformed]:
     """Make a simple network with shared nature CNN"""
 
     class NatureCNN(hk.Module):
         def __call__(self, inputs, is_training: bool = False):
-            inputs = jnp.transpose(inputs, (0, 2, 3, 1)).astype(jnp.float32)
-            return hk.Sequential(
+            if swapaxes:
+                inputs = jnp.swapaxes(inputs, 1, 3).astype(jnp.float32)
+
+            x = hk.Sequential(
                 [
                     hk.Conv2D(
                         32,
@@ -69,6 +74,7 @@ def make_atari_nets(environment: VecEnv) -> Tuple[hk.Transformed, hk.Transformed
                         4,
                         w_init=hk.initializers.Orthogonal(jnp.sqrt(2)),
                         b_init=hk.initializers.Constant(0.0),
+                        name="conv_1",
                     ),
                     jax.nn.relu,
                     hk.Conv2D(
@@ -77,6 +83,7 @@ def make_atari_nets(environment: VecEnv) -> Tuple[hk.Transformed, hk.Transformed
                         2,
                         w_init=hk.initializers.Orthogonal(jnp.sqrt(2)),
                         b_init=hk.initializers.Constant(0.0),
+                        name="conv_2",
                     ),
                     jax.nn.relu,
                     hk.Conv2D(
@@ -85,17 +92,24 @@ def make_atari_nets(environment: VecEnv) -> Tuple[hk.Transformed, hk.Transformed
                         1,
                         w_init=hk.initializers.Orthogonal(jnp.sqrt(2)),
                         b_init=hk.initializers.Constant(0.0),
-                    ),
-                    jax.nn.relu,
-                    hk.Flatten(),
-                    hk.Linear(
-                        512,
-                        w_init=hk.initializers.Orthogonal(jnp.sqrt(2)),
-                        b_init=hk.initializers.Constant(0.0),
+                        name="conv_3",
                     ),
                     jax.nn.relu,
                 ],
+                name="cnn",
             )(inputs)
+
+            x = hk.Flatten()(x)
+            for i, h in enumerate(hidden_layers):
+                x = hk.Linear(
+                    h,
+                    w_init=hk.initializers.Orthogonal(jnp.sqrt(2)),
+                    b_init=hk.initializers.Constant(0.0),
+                    name=f"linear_{i}",
+                )(x)
+                x = jax.nn.relu(x)
+
+            return x
 
     @hk.transform
     def actor_fn(S, is_training: bool = False):
