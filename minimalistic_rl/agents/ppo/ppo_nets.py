@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple
+from typing import Tuple
 
 import haiku as hk
 import jax
@@ -57,7 +57,7 @@ def make_mlp_nets(
 
 
 def make_atari_nets(
-    environment: VecEnv, hidden_layers: Tuple[int, ...] = (512), swapaxes: bool = True
+    environment: VecEnv, hidden_layers: Tuple[int, ...] = (512,), swapaxes: bool = True
 ) -> Tuple[hk.Transformed, hk.Transformed]:
     """Make a simple network with shared nature CNN"""
 
