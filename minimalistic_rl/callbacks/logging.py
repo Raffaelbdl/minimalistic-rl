@@ -1,4 +1,5 @@
 from collections import deque
+from dataclasses import dataclass
 import logging
 
 import numpy as np
@@ -24,19 +25,22 @@ class Logger(Callback):
     be used for logging.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, callback_config: dataclass):
 
         self.logger = init_logger("minimalistic-rl/logger", DEFAULT_FMT, logging.INFO)
-        self.verbose = config["verbose"]
+        self.verbose = callback_config.verbose
 
-        self.num_envs = None
+        self.num_env_steps = callback_config.num_env_steps
+        self.num_steps = callback_config.num_steps
+        self.num_envs = callback_config.num_envs
+
         if self.verbose == 0:
             self.step_bar = tqdm.tqdm(
-                desc="Training ... ", total=(config["n_steps"] + 1)
+                desc="Training ... ", total=(self.num_env_steps + 1)
             )
 
         if self.verbose == 1:
-            self.rewards = deque(maxlen=config["episode_cycle_len"])
+            self.rewards = deque(maxlen=callback_config.episode_cycle_length)
 
     def at_train_start(self, logs: dict):
 
@@ -45,9 +49,11 @@ class Logger(Callback):
 
         self.logger.info("Training is starting !")
 
-        algo = logs["algo"]
-        n_steps = log_handle_large_int(logs["n_steps"])
-        self.logger.info(f"Algo is {algo}, training for {n_steps} steps")
+        agent_name = logs["agent_name"]
+        num_env_steps = log_handle_large_int(self.num_env_steps)
+        self.logger.info(
+            f"Algo is {agent_name}, training for {num_env_steps} env steps"
+        )
 
     def at_train_end(self, logs: dict):
 
@@ -62,14 +68,14 @@ class Logger(Callback):
         self.logger.handlers[0].setFormatter(fmtter)
         last_ended = logs["last_ended"] if "last_ended" in logs.keys() else 0
         ep_count = (
-            logs["ep_count"][last_ended]
-            if isinstance(logs["ep_count"], (list, np.ndarray))
-            else logs["ep_count"]
+            logs["episode_count"][last_ended]
+            if isinstance(logs["episode_count"], (list, np.ndarray))
+            else logs["episode_count"]
         )
         ep_reward = (
-            logs["ep_reward"][last_ended]
-            if isinstance(logs["ep_reward"], (list, np.ndarray))
-            else logs["ep_reward"]
+            logs["episodic_reward"][last_ended]
+            if isinstance(logs["episodic_reward"], (list, np.ndarray))
+            else logs["episodic_reward"]
         )
         total_loss = (
             logs["total_loss"][last_ended]
@@ -101,8 +107,6 @@ class Logger(Callback):
         self.logger.handlers[0].setFormatter(fmtter)
 
         if self.verbose == 0:
-            if self.num_envs is None:
-                self.num_envs = logs["num_envs"] if "num_envs" in logs else 1
             self.step_bar.update(self.num_envs)
 
         if self.verbose == 3:
