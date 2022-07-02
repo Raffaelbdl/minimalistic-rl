@@ -2,29 +2,25 @@
 from collections import deque
 import dataclasses
 import functools
-from typing import Callable, List, Optional, Tuple, Union, Mapping, NamedTuple
+from typing import Callable, Optional
 
-import dm_env
 import gym
 import haiku as hk
 import jax
-import jax.nn as nn
 from jax import numpy as jnp
-import jax.random as jrandom
 import optax
 import numpy as np
 import rlax
-from minimalistic_rl.agents.ppo.ppo_nets import make_mlp_nets
 
-from minimalistic_rl.types import Action, State
-from minimalistic_rl.agents.base import Base
+from minimalistic_rl.agents.base import Base, BaseConfig, OnPolicy, OnPolicyConfig
 from minimalistic_rl.buffer import TransitionBatch, from_singles, Buffer
+from minimalistic_rl.types import Action, State
 from minimalistic_rl.updater import apply_updates
 from minimalistic_rl.wrapper import VecEnv
 
 
 @dataclasses.dataclass
-class PPOConfig:
+class PPOConfig(OnPolicyConfig):
     """Configuration for PPO
 
     Attributes:
@@ -47,9 +43,6 @@ class PPOConfig:
         max_gradient_norm (float)
     """
 
-    seed: int = 0
-
-    num_env_steps: int = int(1e7)
     num_buffer_steps: int = 512
     num_epochs: int = 3
     num_minibatches: int = 4
@@ -74,9 +67,9 @@ class PPO(Base):
         critic_transformed: hk.Transformed,
         ppo_config: Optional[PPOConfig] = None,
     ) -> None:
-        super().__init__("ppo", "on", environment)
-        self.ppo_config = ppo_config if ppo_config is not None else PPOConfig()
-        self.key = jax.random.PRNGKey(self.ppo_config.seed)
+        ppo_config = ppo_config if ppo_config is not None else PPOConfig()
+        super().__init__("ppo", "on", environment, ppo_config)
+        self.agent_config = ppo_config
 
         self.init_buffer()
         self.init_networks(actor_transformed, critic_transformed)
@@ -85,21 +78,21 @@ class PPO(Base):
         self.actor_apply = actor_transformed.apply
         self.critic_apply = critic_transformed.apply
 
-        self._ppo_clip_epsilon = self.ppo_config.ppo_clip_epsilon
-        self._critic_coef = self.ppo_config.critic_coef
-        self._entropy_coef = self.ppo_config.entropy_coef
-        self._discount = self.ppo_config.discount
-        self._gae_lambda = self.ppo_config.gae_lambda
+        self._ppo_clip_epsilon = self.agent_config.ppo_clip_epsilon
+        self._critic_coef = self.agent_config.critic_coef
+        self._entropy_coef = self.agent_config.entropy_coef
+        self._discount = self.agent_config.discount
+        self._gae_lambda = self.agent_config.gae_lambda
 
         self.batch_size = (
-            self.ppo_config.num_buffer_steps
+            self.agent_config.num_buffer_steps
             * self.num_envs
-            // self.ppo_config.num_minibatches
+            // self.agent_config.num_minibatches
         )
 
     def init_buffer(self):
         self.buffer = Buffer(
-            capacity=self.ppo_config.num_buffer_steps, seed=self.ppo_config.seed
+            capacity=self.agent_config.num_buffer_steps, seed=self.agent_config.seed
         )
 
     def init_networks(
@@ -109,27 +102,27 @@ class PPO(Base):
         self.critic_transformed = critic_transformed
 
         key1, key2 = jax.random.split(self.key, 2)
-        dummy_s = self.environment.observation_space.sample()
+        dummy_s = self.envs.observation_space.sample()
         dummy_S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), dummy_s)
         self.actor_params = self.actor_transformed.init(key1, dummy_S)
         self.critic_params = self.critic_transformed.init(key2, dummy_S)
         self.params = hk.data_structures.merge(self.actor_params, self.critic_params)
 
     def init_optimizer(self):
-        learning_rate = self.ppo_config.learning_rate
-        if self.ppo_config.learning_rate_annealing:
+        learning_rate = self.agent_config.learning_rate
+        if self.agent_config.learning_rate_annealing:
             num_updates = (
-                self.ppo_config.num_env_steps
-                // self.ppo_config.num_buffer_steps
+                self.agent_config.num_env_steps
+                // self.agent_config.num_buffer_steps
                 // self.num_envs
-                * self.ppo_config.num_epochs
-                * self.ppo_config.num_minibatches
+                * self.agent_config.num_epochs
+                * self.agent_config.num_minibatches
             )
             print(num_updates)
             learning_rate = optax.linear_schedule(learning_rate, 0.0, num_updates, 0)
         self.optimizer = optax.chain(
-            optax.clip_by_global_norm(self.ppo_config.max_gradient_norm),
-            optax.adam(learning_rate, eps=self.ppo_config.adam_epsilon),
+            optax.clip_by_global_norm(self.agent_config.max_gradient_norm),
+            optax.adam(learning_rate, eps=self.agent_config.adam_epsilon),
         )
         self.opt_state = self.optimizer.init(self.params)
 
@@ -159,13 +152,14 @@ class PPO(Base):
         """Perform an action in the environment"""
 
         key1, key2 = jax.random.split(key, 2)
-        if isinstance(self.environment, VecEnv):
-            S = s
-        else:
-            S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
+        S = s
+        # if isinstance(self.envs, VecEnv):
+        #     S = s
+        # else:
+        #     S = jax.tree_map(lambda x: jnp.expand_dims(x, axis=0), s)
 
         Logits = jax.jit(self.actor_apply)(self.params, key1, S)
-        Probs = nn.softmax(Logits, axis=-1)
+        Probs = jax.nn.softmax(Logits, axis=-1)
 
         A = rlax.categorical_sample(key2, Probs)
         Probs_A = jnp.take_along_axis(Probs, A[..., jnp.newaxis], axis=-1)
@@ -180,12 +174,12 @@ class PPO(Base):
         Transition = self.get_prepared_transition(key1)
         idx = jnp.arange(len(Transition.S))
 
-        for epoch in range(self.ppo_config.num_epochs):
+        for epoch in range(self.agent_config.num_epochs):
             key2 = jax.random.split(key2)[0]
             idx = jax.random.permutation(key2, idx, independent=True)
 
-            for i in range(self.ppo_config.num_minibatches):
-                logs["n_updates"] += 1
+            for i in range(self.agent_config.num_minibatches):
+                logs["num_updates"] += 1
                 key3 = jax.random.split(key3)[0]
                 _idx = idx[i * self.batch_size : (i + 1) * self.batch_size]
                 _Transition = jax.tree_map(lambda leaf: leaf[_idx], Transition)
@@ -228,7 +222,7 @@ class PPO(Base):
 @functools.partial(jax.jit, static_argnums=(2, 3, 8))
 def ppo_loss(
     params: hk.Params,
-    rng: jrandom.PRNGKey,
+    rng: jax.random.PRNGKey,
     actor_apply: Callable,
     critic_apply: Callable,
     epsilon,
@@ -247,7 +241,7 @@ def ppo_loss(
     V = critic_apply(params, rng, S)[..., 0]
 
     new_Probs = jnp.take_along_axis(
-        nn.softmax(new_Logits, axis=-1), A[..., jnp.newaxis], axis=-1
+        jax.nn.softmax(new_Logits, axis=-1), A[..., jnp.newaxis], axis=-1
     )[..., 0]
     new_Logp = jnp.log(new_Probs + 1e-6)
 
@@ -273,7 +267,7 @@ def ppo_loss(
 @functools.partial(jax.jit, static_argnums=(2))
 def prepare_data(
     params: hk.Params,
-    rng: jrandom.PRNGKey,
+    rng: jax.random.PRNGKey,
     critic_apply: Callable,
     discount: float,
     lambda_: float,
