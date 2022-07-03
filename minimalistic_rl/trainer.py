@@ -1,7 +1,7 @@
 """Simple training loop"""
+from collections import deque
 import dataclasses
 import functools
-from gc import callbacks
 from typing import List, Optional, Union
 
 import jax
@@ -29,88 +29,6 @@ class TrainingConfig:
     verbose: int = 0
     episode_cycle_length: int = 10
     render: bool = False
-
-
-def _train(
-    agent: base.Base,
-    callbacks: Optional[List[Callback]] = None,
-    training_config: TrainingConfig = Optional[None],
-):
-
-    training_config = (
-        training_config if training_config is not None else TrainingConfig()
-    )
-    training_config.num_envs = agent.num_envs
-    training_config.num_env_steps = agent.num_env_steps
-
-    logs = init_logs(agent, env.num_envs)
-    callbacks = init_callbacks(training_config, callbacks)
-
-    if not isinstance(env, VecEnv):
-        env = VecEnv(env, 1)
-
-    for c in callbacks:
-        c.at_train_start(logs)
-
-    n_steps = logs["n_steps"]
-    if agent.policy == "off":
-        improve_condition = functools.partial(
-            off_policy_improve_condition,
-            improve_cycle=config["improve_cycle"],
-            batch_size=config["batch_size"],
-        )
-    elif agent.policy == "on":
-        improve_condition = functools.partial(
-            on_policy_improve_condition, T=config["T"]
-        )
-
-    s = env.reset(seed=int(rng[0]))
-    logs["max_steps"] = (n_steps + 1) // env.num_envs
-    for step in range(1, (n_steps + 1) // env.num_envs):
-
-        if render:
-            env[0].render()
-
-        logs["step_count"] = step
-        for c in callbacks:
-            c.at_step_start(logs)
-
-        rng, rng1 = jrng.split(rng, 2)
-        a, logp = agent.act(rng=rng1, s=s)
-        s_next, r, done, _ = env.step(action=a)
-        logs["step_reward"] = r
-
-        transition = from_singles(s, a, r, done, s_next, logp)
-        agent.buffer.add(transition=transition)
-
-        if improve_condition(step=step, agent=agent):
-            logs = agent.improve(logs)
-
-        s = np.zeros(
-            (env.num_envs,) + env.observation_space.shape, dtype=env.observation_type
-        )
-        for i, d in enumerate(done):
-            if d:
-                logs["ep_count"] += 1
-                logs["last_ended"] = i
-                logs["last_ep_reward"] = logs["ep_reward"][i]
-                for c in callbacks:
-                    c.at_episode_end(logs)
-
-                rng = jrng.split(rng)[0]
-                s[i] = env[i].reset(seed=int(rng[0]))
-                logs["ep_reward"][i] = 0.0
-            else:
-                logs["ep_reward"][i] += r[i]
-                s[i] = s_next[i]
-
-        for c in callbacks:
-            c.at_step_end(logs)
-
-    for c in callbacks:
-        c.at_train_end(logs)
-
-    return logs
 
 
 def train(
@@ -162,6 +80,7 @@ def train(
                 for c in callbacks:
                     logs["episode_count"] += 1
                     logs["last_ended"] = i
+                    logs["episodic_return"] = logs["episodic_reward"][i]
                     c.at_episode_end(logs)
                 logs["episodic_reward"][i] = 0.0
 
@@ -194,6 +113,7 @@ def init_logs(agent: base.Base) -> dict:
         "step_count": 0,
         "step_reward": np.zeros((agent.num_envs,), dtype=np.float32),
         "episodic_reward": np.zeros((agent.num_envs,), dtype=np.float32),
+        "last_episode_return": 0,
         "num_updates": 0,
     }
 
