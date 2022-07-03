@@ -7,4 +7,5 @@ dm-haiku >= 0.0.6
 optax >= 0.1.2
 pyyaml >= 6.0
 rlax >= 0.1.2
--f https://storage.googleapis.com/jax-releases/jax_releases.html
+envpool >= 0.6.2
+tqdm >= 4.64.0
